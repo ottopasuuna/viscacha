@@ -2,11 +2,14 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"math"
+	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/prologic/go-gopher"
@@ -32,6 +35,7 @@ var gopher_to_content_type = map[gopher.ItemType]ContentType{
 
 type Page struct {
 	Type    ContentType
+	Url     string
 	Content string
 	Links   []string
 }
@@ -69,6 +73,7 @@ func GopherHandler(url string) (Page, bool) {
 	}
 	return Page{
 		Type:    content_type,
+		Url:     url,
 		Content: content,
 		Links:   links,
 	}, true
@@ -107,7 +112,7 @@ func RenderTextFile(pageview *tview.TextView, page *Page) {
 
 func RenderGopherDirectory(textview *tview.TextView, page *Page) {
 	link_counter := 1
-	n_link_digits := int(math.Log10(float64(len(page.Links)))) + 1
+	n_link_digits := int(math.Max(math.Log10(float64(len(page.Links))), 0)) + 1
 	link_format := fmt.Sprintf("[green]%%s [%%%dd][white] ", n_link_digits)
 	for _, line := range strings.Split(page.Content, "\n") {
 		item, err := gopher.ParseItem(line)
@@ -133,6 +138,26 @@ func RenderGopherDirectory(textview *tview.TextView, page *Page) {
 	}
 }
 
+type LogMessageHandler struct {
+	Text        string          // Internal buffer of log messages
+	MessageLine *tview.TextView // TextView to display the last log to
+	LogFile     io.Writer
+}
+
+func (handler *LogMessageHandler) Write(p []byte) (n int, err error) {
+	handler.Text = handler.Text + string(p)
+	if handler.LogFile != nil {
+		fmt.Fprintf(handler.LogFile, string(p))
+	}
+	handler.MessageLine.Clear()
+	// Cut off date/time
+	if len(p) > 20 {
+		p = p[20:]
+	}
+	fmt.Fprintf(handler.MessageLine, string(p))
+	return len(p), nil
+}
+
 func main() {
 	app := tview.NewApplication()
 	textView := tview.NewTextView().
@@ -142,18 +167,41 @@ func main() {
 			app.Draw()
 		})
 	textView.SetBorder(false)
+
 	numSelections := 0
+	statusLine := tview.NewTextView()
+	statusLine.SetTextColor(tcell.GetColor("black"))
+	statusLine.SetBackgroundColor(tcell.GetColor("white"))
+
 	messageLine := tview.NewTextView()
-	messageLine.SetBackgroundColor(tcell.GetColor("white"))
-	messageLine.SetTextColor(tcell.GetColor("black"))
+	messageLine.SetChangedFunc(func() {
+		app.Draw()
+		time.AfterFunc(3*time.Second, func() {
+			messageLine.Clear()
+			app.Draw()
+		})
+	})
+	logFile, err := os.Create("log.log") // TODO: proper path for this...
+	if err != nil {
+		log.Println(err)
+	} else {
+		defer logFile.Close()
+	}
+	var logHandler = LogMessageHandler{
+		MessageLine: messageLine,
+		Text:        "",
+		LogFile:     logFile,
+	}
+	log.SetOutput(&logHandler)
 
 	grid_layout := tview.NewGrid().
-		SetRows(0, 1).
+		SetRows(0, 1, 1).
 		SetColumns(0).
 		SetBorders(false)
 
 	grid_layout.AddItem(textView, 0, 0, 1, 1, 0, 0, true)
-	grid_layout.AddItem(messageLine, 1, 0, 1, 1, 0, 0, false)
+	grid_layout.AddItem(statusLine, 1, 0, 1, 1, 0, 0, false)
+	grid_layout.AddItem(messageLine, 2, 0, 1, 1, 0, 0, false)
 
 	// Go to a URL
 	// url := "gopher://circumlunar.space"
@@ -164,6 +212,8 @@ func main() {
 		log.Fatal("Failed to get gopher url")
 	}
 	RenderPage(textView, &page)
+	statusLine.Clear()
+	fmt.Fprintf(statusLine, page.Url)
 	page_history := []*Page{&page}
 	history_index := 0
 
@@ -195,19 +245,39 @@ func main() {
 				history_index -= 1
 				prev_page := page_history[history_index]
 				RenderPage(textView, prev_page)
+				statusLine.Clear()
+				fmt.Fprintf(statusLine, prev_page.Url)
 			} else {
-				messageLine.Clear()
-				fmt.Fprintln(messageLine, "Already at first page")
+				log.Println("Already at first page")
 			}
+			return nil
 		case 'l':
 			if history_index < len(page_history)-1 {
 				history_index += 1
 				next_page := page_history[history_index]
 				RenderPage(textView, next_page)
+				statusLine.Clear()
+				fmt.Fprintf(statusLine, next_page.Url)
 			} else {
-				messageLine.Clear()
-				fmt.Fprintln(messageLine, "Already at last page")
+				log.Println("Already at last page")
 			}
+			return nil
+		case '\\':
+			logView := tview.NewTextView().
+				SetChangedFunc(func() {
+					app.Draw()
+				})
+			logView.SetBorder(true)
+			logView.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+				if event.Rune() == '\\' {
+					app.SetRoot(grid_layout, true).SetFocus(textView)
+					return nil
+				}
+				return event
+			})
+			fmt.Fprintf(logView, logHandler.Text)
+			app.SetRoot(logView, true).SetFocus(logView)
+			return nil
 		}
 
 		// Bind number keys to quick select links
@@ -218,9 +288,11 @@ func main() {
 					url := current_page.Links[i-1]
 					page, success := GopherHandler(url)
 					if !success {
-						fmt.Println("Failed to get gopher url")
+						log.Println("Failed to get gopher url")
 					}
 					RenderPage(textView, &page)
+					statusLine.Clear()
+					fmt.Fprintf(statusLine, page.Url)
 					page_history = append(page_history[:history_index+1], &page)
 					history_index += 1
 					return nil
