@@ -1,13 +1,13 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"log"
 	"math"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
@@ -94,23 +94,35 @@ func gopherMakeLinkMap(dir *gopher.Directory) []string {
 	return link_map
 }
 
-func RenderPage(pageview *tview.TextView, page *Page) {
+type PageView struct {
+	PageText   *tview.TextView
+	StatusLine *tview.TextView
+}
+
+func (pageview *PageView) Clear() {
+	pageview.PageText.Clear()
+	pageview.StatusLine.Clear()
+}
+
+func (pageview *PageView) RenderPage(page *Page) {
 	pageview.Clear()
 	switch page.Type {
 	case TextType:
-		RenderTextFile(pageview, page)
+		pageview.RenderTextFile(page)
 	case GopherDirectory:
-		RenderGopherDirectory(pageview, page)
+		pageview.RenderGopherDirectory(page)
 	default:
-		fmt.Fprintf(pageview, "[red] page type not recognized \"%d\"[white]", page.Type)
+		fmt.Fprintf(pageview.PageText, "[red] page type not recognized \"%d\"[white]", page.Type)
+		log.Printf("[red] page type not recognized \"%d\"[white]\n", page.Type)
 	}
 }
 
-func RenderTextFile(pageview *tview.TextView, page *Page) {
-	fmt.Fprintf(pageview, page.Content)
+func (pageview *PageView) RenderTextFile(page *Page) {
+	fmt.Fprintf(pageview.PageText, page.Content)
 }
 
-func RenderGopherDirectory(textview *tview.TextView, page *Page) {
+func (pageview *PageView) RenderGopherDirectory(page *Page) {
+	textview := pageview.PageText
 	link_counter := 1
 	n_link_digits := int(math.Max(math.Log10(float64(len(page.Links))), 0)) + 1
 	link_format := fmt.Sprintf("[green]%%s [%%%dd][white] ", n_link_digits)
@@ -158,7 +170,19 @@ func (handler *LogMessageHandler) Write(p []byte) (n int, err error) {
 	return len(p), nil
 }
 
+const DEFAULT_LOG_PATH = "log.log"
+const HOME_PAGE = "gopher://gopher.floodgap.com/"
+
 func main() {
+	// Parse cli arguments:
+	flag.Parse()
+	var url = flag.Arg(0)
+	fmt.Println(url)
+	if url == "" {
+		url = HOME_PAGE
+	}
+
+	// Build tview Application UI
 	app := tview.NewApplication()
 	textView := tview.NewTextView().
 		SetDynamicColors(true).
@@ -168,7 +192,6 @@ func main() {
 		})
 	textView.SetBorder(false)
 
-	numSelections := 0
 	statusLine := tview.NewTextView()
 	statusLine.SetTextColor(tcell.GetColor("black"))
 	statusLine.SetBackgroundColor(tcell.GetColor("white"))
@@ -181,7 +204,23 @@ func main() {
 			app.Draw()
 		})
 	})
-	logFile, err := os.Create("log.log") // TODO: proper path for this...
+
+	grid_layout := tview.NewGrid().
+		SetRows(0, 1, 1).
+		SetColumns(0).
+		SetBorders(false)
+
+	grid_layout.AddItem(textView, 0, 0, 1, 1, 0, 0, true)
+	grid_layout.AddItem(statusLine, 1, 0, 1, 1, 0, 0, false)
+	grid_layout.AddItem(messageLine, 2, 0, 1, 1, 0, 0, false)
+
+	pageView := PageView{
+		PageText:   textView,
+		StatusLine: statusLine,
+	}
+
+	// Setup log file handling
+	logFile, err := os.Create(DEFAULT_LOG_PATH)
 	if err != nil {
 		log.Println(err)
 	} else {
@@ -194,24 +233,12 @@ func main() {
 	}
 	log.SetOutput(&logHandler)
 
-	grid_layout := tview.NewGrid().
-		SetRows(0, 1, 1).
-		SetColumns(0).
-		SetBorders(false)
-
-	grid_layout.AddItem(textView, 0, 0, 1, 1, 0, 0, true)
-	grid_layout.AddItem(statusLine, 1, 0, 1, 1, 0, 0, false)
-	grid_layout.AddItem(messageLine, 2, 0, 1, 1, 0, 0, false)
-
 	// Go to a URL
-	// url := "gopher://circumlunar.space"
-	// url := "gopher://zaibatsu.circumlunar.space:70"
-	url := "gopher://gopher.floodgap.com/"
 	page, success := GopherHandler(url)
 	if !success {
 		log.Fatal("Failed to get gopher url")
 	}
-	RenderPage(textView, &page)
+	pageView.RenderPage(&page)
 	statusLine.Clear()
 	fmt.Fprintf(statusLine, page.Url)
 	page_history := []*Page{&page}
@@ -244,7 +271,7 @@ func main() {
 			if history_index > 0 {
 				history_index -= 1
 				prev_page := page_history[history_index]
-				RenderPage(textView, prev_page)
+				pageView.RenderPage(prev_page)
 				statusLine.Clear()
 				fmt.Fprintf(statusLine, prev_page.Url)
 			} else {
@@ -255,7 +282,7 @@ func main() {
 			if history_index < len(page_history)-1 {
 				history_index += 1
 				next_page := page_history[history_index]
-				RenderPage(textView, next_page)
+				pageView.RenderPage(next_page)
 				statusLine.Clear()
 				fmt.Fprintf(statusLine, next_page.Url)
 			} else {
@@ -290,7 +317,7 @@ func main() {
 					if !success {
 						log.Println("Failed to get gopher url")
 					}
-					RenderPage(textView, &page)
+					pageView.RenderPage(&page)
 					statusLine.Clear()
 					fmt.Fprintf(statusLine, page.Url)
 					page_history = append(page_history[:history_index+1], &page)
@@ -304,26 +331,6 @@ func main() {
 		return event
 	})
 
-	textView.SetDoneFunc(func(key tcell.Key) {
-		currentSelection := textView.GetHighlights()
-		if key == tcell.KeyEnter {
-			if len(currentSelection) > 0 {
-				textView.Highlight()
-			} else {
-				textView.Highlight("0").ScrollToHighlight()
-			}
-		} else if len(currentSelection) > 0 {
-			index, _ := strconv.Atoi(currentSelection[0])
-			if key == tcell.KeyTab {
-				index = (index + 1) % numSelections
-			} else if key == tcell.KeyBacktab {
-				index = (index - 1 + numSelections) % numSelections
-			} else {
-				return
-			}
-			textView.Highlight(strconv.Itoa(index)).ScrollToHighlight()
-		}
-	})
 	if err := app.SetRoot(grid_layout, true).SetFocus(textView).Run(); err != nil {
 		panic(err)
 	}
