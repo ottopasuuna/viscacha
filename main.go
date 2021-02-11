@@ -65,7 +65,33 @@ func (manager *HistoryManager) Forward() *Page {
 
 // Get the current page
 func (manager *HistoryManager) CurrentPage() *Page {
+	if len(manager.page_history) == 0 {
+		return nil
+	}
 	return manager.page_history[manager.history_index]
+}
+
+type Client struct {
+	pageView       *PageView
+	historyManager *HistoryManager
+}
+
+func (client *Client) GotoUrl(url string) {
+	client.SaveScroll()
+	page, success := GopherHandler(url)
+	if !success {
+		log.Println("Failed to get gopher url")
+	}
+	client.pageView.RenderPage(&page)
+	client.historyManager.Navigate(&page)
+}
+
+func (client *Client) SaveScroll() {
+	page := client.historyManager.CurrentPage()
+	if page != nil {
+		row, _ := client.pageView.PageText.GetScrollOffset()
+		page.ScrollOffset = row
+	}
 }
 
 type LogMessageHandler struct {
@@ -153,13 +179,14 @@ func main() {
 	log.SetOutput(&logHandler)
 
 	// Go to a URL
-	page, success := GopherHandler(url)
-	if !success {
-		log.Fatal("Failed to get gopher url")
-	}
-	pageView.RenderPage(&page)
 	historyManager := HistoryManager{}
-	historyManager.Navigate(&page)
+
+	client := Client{
+		pageView:       &pageView,
+		historyManager: &historyManager,
+	}
+
+	client.GotoUrl(url)
 
 	// Set input handler for top level app
 	app.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
@@ -185,8 +212,7 @@ func main() {
 			textView.ScrollTo(curr_row-height/2, 0)
 			return nil
 		case 'h':
-			row, _ := pageView.PageText.GetScrollOffset()
-			historyManager.CurrentPage().ScrollOffset = row
+			client.SaveScroll()
 			prev_page := historyManager.Back()
 			if prev_page != nil {
 				pageView.RenderPage(prev_page)
@@ -195,8 +221,7 @@ func main() {
 			}
 			return nil
 		case 'l':
-			row, _ := pageView.PageText.GetScrollOffset()
-			historyManager.CurrentPage().ScrollOffset = row
+			client.SaveScroll()
 			next_page := historyManager.Forward()
 			if next_page != nil {
 				pageView.RenderPage(next_page)
@@ -215,19 +240,10 @@ func main() {
 					cmd := strings.Split(commandString, " ")[0]
 					if link_num, err := strconv.ParseInt(cmd, 10, 32); err == nil {
 						current_page := historyManager.CurrentPage()
-						row, _ := pageView.PageText.GetScrollOffset()
-						current_page.ScrollOffset = row
 						url := current_page.Links[link_num-1]
-						page, success := GopherHandler(url)
-						if !success {
-							log.Println("Failed to get gopher url")
-						}
-						pageView.RenderPage(&page)
-						historyManager.Navigate(&page)
+						client.GotoUrl(url)
 					} else {
 						switch cmd {
-						case "historyForward":
-
 						default:
 							log.Printf("[red]Not a valid command: \"%s\"[white]\n", cmd)
 						}
@@ -241,7 +257,7 @@ func main() {
 			grid_layout.AddItem(commandLine, 2, 0, 1, 1, 0, 0, true)
 			app.SetFocus(commandLine)
 			return nil
-		case '\\':
+		case '\\': // Log view page
 			logView := tview.NewTextView().
 				SetChangedFunc(func() {
 					app.Draw()
@@ -262,22 +278,13 @@ func main() {
 		// Bind number keys to quick select links
 		for i := 1; i <= 9; i++ {
 			if (event.Rune()) == rune(i+48) {
-				if len(page.Links) >= i {
-					current_page := historyManager.CurrentPage()
-					row, _ := pageView.PageText.GetScrollOffset()
-					current_page.ScrollOffset = row
+				current_page := historyManager.CurrentPage()
+				if len(current_page.Links) >= i {
 					url := current_page.Links[i-1]
-					page, success := GopherHandler(url)
-					if !success {
-						log.Println("Failed to get gopher url")
-					}
-					pageView.RenderPage(&page)
-					historyManager.Navigate(&page)
+					client.GotoUrl(url)
 					return nil
 				}
-
 			}
-
 		}
 		return event
 	})
