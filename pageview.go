@@ -58,10 +58,14 @@ func (pageview *PageView) RenderGopherDirectory(page *Page) {
 		}
 		var txt_color string
 		switch item.Type {
-		case gopher.DIRECTORY:
-			txt_color = "[yellow]"
-		default:
+		case gopher.INFO:
 			txt_color = "[white]"
+		case gopher.FILE:
+			txt_color = "[white]"
+		case gopher.DIRECTORY:
+			txt_color = "[skyblue]"
+		default:
+			txt_color = "[red]"
 		}
 		fmt.Fprintf(textview, "%s%s\n[white]", txt_color, item.Description)
 	}
