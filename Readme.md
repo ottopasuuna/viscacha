@@ -5,6 +5,11 @@ A colorfull, terminal based Gopher browser with Vim like bindings.
 Inspired by bombadillo and amfora, sort of a combination of the two.
 
 ## Future plans:
+- [o] Gopher support
+    - [X] 0 Text
+    - [X] 1 Directory
+    - [ ] 7 Index-Search
+    - [ ] 4, 5, 9, g, I:  hex, binary file or image to download
 - [ ] Gemini support
 - [ ] Simple http support? maybe...
 - [ ] Bookmarks

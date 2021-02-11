@@ -6,6 +6,8 @@ import (
 	"io"
 	"log"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gdamore/tcell/v2"
@@ -112,7 +114,8 @@ func main() {
 	statusLine.SetTextColor(tcell.GetColor("black"))
 	statusLine.SetBackgroundColor(tcell.GetColor("white"))
 
-	messageLine := tview.NewTextView()
+	messageLine := tview.NewTextView().
+		SetDynamicColors(true)
 	messageLine.SetChangedFunc(func() {
 		app.Draw()
 		time.AfterFunc(3*time.Second, func() {
@@ -200,6 +203,43 @@ func main() {
 			} else {
 				log.Println("Already at last page")
 			}
+			return nil
+		case ':':
+			// Open command line
+			commandLine := tview.NewInputField().
+				SetLabel(": ")
+			commandLine.SetDoneFunc(func(key tcell.Key) {
+				if key == tcell.KeyEnter {
+					// Dispatch command
+					commandString := commandLine.GetText()
+					cmd := strings.Split(commandString, " ")[0]
+					if link_num, err := strconv.ParseInt(cmd, 10, 32); err == nil {
+						current_page := historyManager.CurrentPage()
+						row, _ := pageView.PageText.GetScrollOffset()
+						current_page.ScrollOffset = row
+						url := current_page.Links[link_num-1]
+						page, success := GopherHandler(url)
+						if !success {
+							log.Println("Failed to get gopher url")
+						}
+						pageView.RenderPage(&page)
+						historyManager.Navigate(&page)
+					} else {
+						switch cmd {
+						case "historyForward":
+
+						default:
+							log.Printf("[red]Not a valid command: \"%s\"[white]\n", cmd)
+						}
+					}
+				}
+				grid_layout.RemoveItem(commandLine)
+				grid_layout.AddItem(messageLine, 2, 0, 1, 1, 0, 0, false)
+				app.SetFocus(textView)
+			})
+			grid_layout.RemoveItem(messageLine)
+			grid_layout.AddItem(commandLine, 2, 0, 1, 1, 0, 0, true)
+			app.SetFocus(commandLine)
 			return nil
 		case '\\':
 			logView := tview.NewTextView().
