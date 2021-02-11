@@ -22,6 +22,7 @@ func (pageview *PageView) Clear() {
 
 func (pageview *PageView) RenderPage(page *Page) {
 	pageview.Clear()
+	fmt.Fprintf(pageview.StatusLine, page.Url)
 	switch page.Type {
 	case TextType:
 		pageview.RenderTextFile(page)

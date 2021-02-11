@@ -155,8 +155,6 @@ func main() {
 		log.Fatal("Failed to get gopher url")
 	}
 	pageView.RenderPage(&page)
-	statusLine.Clear()
-	fmt.Fprintf(statusLine, page.Url)
 	historyManager := HistoryManager{}
 	historyManager.Navigate(&page)
 
@@ -189,8 +187,6 @@ func main() {
 			prev_page := historyManager.Back()
 			if prev_page != nil {
 				pageView.RenderPage(prev_page)
-				statusLine.Clear()
-				fmt.Fprintf(statusLine, prev_page.Url)
 			} else {
 				log.Println("Already at first page")
 			}
@@ -201,8 +197,6 @@ func main() {
 			next_page := historyManager.Forward()
 			if next_page != nil {
 				pageView.RenderPage(next_page)
-				statusLine.Clear()
-				fmt.Fprintf(statusLine, next_page.Url)
 			} else {
 				log.Println("Already at last page")
 			}
@@ -238,8 +232,6 @@ func main() {
 						log.Println("Failed to get gopher url")
 					}
 					pageView.RenderPage(&page)
-					statusLine.Clear()
-					fmt.Fprintf(statusLine, page.Url)
 					historyManager.Navigate(&page)
 					return nil
 				}
