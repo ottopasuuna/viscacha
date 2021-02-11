@@ -17,6 +17,55 @@ import (
 // which contains all the relavent information. The browser history is a list of Pages.
 // Various Render functions write the Page content to a tview TextView.
 
+// Keeps track of page history and navigation
+type HistoryManager struct {
+	page_history  []*Page
+	history_index int
+}
+
+// Navigates to a new page. All previous pages in the history are kept,
+// but pages forward in the history are dropped
+func (manager *HistoryManager) Navigate(page *Page) {
+	if len(manager.page_history) == 0 { // initial page
+		manager.page_history = []*Page{page}
+		manager.history_index = 0
+	} else {
+		manager.page_history = append(manager.page_history[:manager.history_index+1], page)
+		manager.history_index += 1
+	}
+}
+
+// Move backwards in the history
+// Returns nil if on the first page
+func (manager *HistoryManager) Back() *Page {
+	var prev_page *Page
+	if manager.history_index > 0 {
+		manager.history_index -= 1
+		prev_page = manager.page_history[manager.history_index]
+	} else {
+		prev_page = nil
+	}
+	return prev_page
+}
+
+// Move forwards in the history.
+// Returns nil if on the last page
+func (manager *HistoryManager) Forward() *Page {
+	var next_page *Page
+	if manager.history_index < len(manager.page_history)-1 {
+		manager.history_index += 1
+		next_page = manager.page_history[manager.history_index]
+	} else {
+		next_page = nil
+	}
+	return next_page
+}
+
+// Get the current page
+func (manager *HistoryManager) CurrentPage() *Page {
+	return manager.page_history[manager.history_index]
+}
+
 type LogMessageHandler struct {
 	Text        string          // Internal buffer of log messages
 	MessageLine *tview.TextView // TextView to display the last log to
@@ -108,8 +157,8 @@ func main() {
 	pageView.RenderPage(&page)
 	statusLine.Clear()
 	fmt.Fprintf(statusLine, page.Url)
-	page_history := []*Page{&page}
-	history_index := 0
+	historyManager := HistoryManager{}
+	historyManager.Navigate(&page)
 
 	// Set input handler for top level app
 	app.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
@@ -135,11 +184,10 @@ func main() {
 			textView.ScrollTo(curr_row-height/2, 0)
 			return nil
 		case 'h':
-			if history_index > 0 {
-				row, _ := pageView.PageText.GetScrollOffset()
-				page_history[history_index].ScrollOffset = row
-				history_index -= 1
-				prev_page := page_history[history_index]
+			row, _ := pageView.PageText.GetScrollOffset()
+			historyManager.CurrentPage().ScrollOffset = row
+			prev_page := historyManager.Back()
+			if prev_page != nil {
 				pageView.RenderPage(prev_page)
 				statusLine.Clear()
 				fmt.Fprintf(statusLine, prev_page.Url)
@@ -148,11 +196,10 @@ func main() {
 			}
 			return nil
 		case 'l':
-			if history_index < len(page_history)-1 {
-				row, _ := pageView.PageText.GetScrollOffset()
-				page_history[history_index].ScrollOffset = row
-				history_index += 1
-				next_page := page_history[history_index]
+			row, _ := pageView.PageText.GetScrollOffset()
+			historyManager.CurrentPage().ScrollOffset = row
+			next_page := historyManager.Forward()
+			if next_page != nil {
 				pageView.RenderPage(next_page)
 				statusLine.Clear()
 				fmt.Fprintf(statusLine, next_page.Url)
@@ -182,7 +229,7 @@ func main() {
 		for i := 1; i <= 9; i++ {
 			if (event.Rune()) == rune(i+48) {
 				if len(page.Links) >= i {
-					current_page := page_history[history_index]
+					current_page := historyManager.CurrentPage()
 					row, _ := pageView.PageText.GetScrollOffset()
 					current_page.ScrollOffset = row
 					url := current_page.Links[i-1]
@@ -193,8 +240,7 @@ func main() {
 					pageView.RenderPage(&page)
 					statusLine.Clear()
 					fmt.Fprintf(statusLine, page.Url)
-					page_history = append(page_history[:history_index+1], &page)
-					history_index += 1
+					historyManager.Navigate(&page)
 					return nil
 				}
 
