@@ -136,6 +136,8 @@ func main() {
 			return nil
 		case 'h':
 			if history_index > 0 {
+				row, _ := pageView.PageText.GetScrollOffset()
+				page_history[history_index].ScrollOffset = row
 				history_index -= 1
 				prev_page := page_history[history_index]
 				pageView.RenderPage(prev_page)
@@ -147,6 +149,8 @@ func main() {
 			return nil
 		case 'l':
 			if history_index < len(page_history)-1 {
+				row, _ := pageView.PageText.GetScrollOffset()
+				page_history[history_index].ScrollOffset = row
 				history_index += 1
 				next_page := page_history[history_index]
 				pageView.RenderPage(next_page)
@@ -179,6 +183,8 @@ func main() {
 			if (event.Rune()) == rune(i+48) {
 				if len(page.Links) >= i {
 					current_page := page_history[history_index]
+					row, _ := pageView.PageText.GetScrollOffset()
+					current_page.ScrollOffset = row
 					url := current_page.Links[i-1]
 					page, success := GopherHandler(url)
 					if !success {

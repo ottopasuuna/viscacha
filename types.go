@@ -17,8 +17,9 @@ var Gopher_to_content_type = map[gopher.ItemType]ContentType{
 }
 
 type Page struct {
-	Type    ContentType
-	Url     string
-	Content string
-	Links   []string
+	Type         ContentType
+	Url          string
+	Content      string
+	Links        []string
+	ScrollOffset int
 }

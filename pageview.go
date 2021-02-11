@@ -35,6 +35,7 @@ func (pageview *PageView) RenderPage(page *Page) {
 
 func (pageview *PageView) RenderTextFile(page *Page) {
 	fmt.Fprintf(pageview.PageText, page.Content)
+	pageview.PageText.ScrollTo(page.ScrollOffset, 0)
 }
 
 func (pageview *PageView) RenderGopherDirectory(page *Page) {
@@ -62,6 +63,6 @@ func (pageview *PageView) RenderGopherDirectory(page *Page) {
 			txt_color = "[white]"
 		}
 		fmt.Fprintf(textview, "%s%s\n[white]", txt_color, item.Description)
-
 	}
+	pageview.PageText.ScrollTo(page.ScrollOffset, 0)
 }
