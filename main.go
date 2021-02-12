@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -120,10 +121,10 @@ const HOME_PAGE = "gopher://gopher.floodgap.com/"
 func main() {
 	// Parse cli arguments:
 	flag.Parse()
-	var url = flag.Arg(0)
-	fmt.Println(url)
-	if url == "" {
-		url = HOME_PAGE
+	var init_url = flag.Arg(0)
+	fmt.Println(init_url)
+	if init_url == "" {
+		init_url = HOME_PAGE
 	}
 
 	// Build tview Application UI
@@ -159,6 +160,20 @@ func main() {
 	grid_layout.AddItem(statusLine, 1, 0, 1, 1, 0, 0, false)
 	grid_layout.AddItem(messageLine, 2, 0, 1, 1, 0, 0, false)
 
+	BuildCommandLine := func(label string, handler func(commandLine *tview.InputField, key tcell.Key)) {
+		commandLine := tview.NewInputField().
+			SetLabel(label)
+		commandLine.SetDoneFunc(func(key tcell.Key) {
+			handler(commandLine, key)
+			grid_layout.RemoveItem(commandLine)
+			grid_layout.AddItem(messageLine, 2, 0, 1, 1, 0, 0, false)
+			app.SetFocus(textView)
+		})
+		grid_layout.RemoveItem(messageLine)
+		grid_layout.AddItem(commandLine, 2, 0, 1, 1, 0, 0, true)
+		app.SetFocus(commandLine)
+	}
+
 	pageView := PageView{
 		PageText:   textView,
 		StatusLine: statusLine,
@@ -186,7 +201,7 @@ func main() {
 		historyManager: &historyManager,
 	}
 
-	client.GotoUrl(url)
+	client.GotoUrl(init_url)
 
 	// Set input handler for top level app
 	app.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
@@ -231,31 +246,31 @@ func main() {
 			return nil
 		case ':':
 			// Open command line
-			commandLine := tview.NewInputField().
-				SetLabel(": ")
-			commandLine.SetDoneFunc(func(key tcell.Key) {
+			BuildCommandLine(": ", func(commandLine *tview.InputField, key tcell.Key) {
 				if key == tcell.KeyEnter {
 					// Dispatch command
 					commandString := commandLine.GetText()
 					cmd := strings.Split(commandString, " ")[0]
 					if link_num, err := strconv.ParseInt(cmd, 10, 32); err == nil {
 						current_page := historyManager.CurrentPage()
-						url := current_page.Links[link_num-1]
+						url := current_page.Links[link_num-1].Url
 						client.GotoUrl(url)
 					} else {
-						switch cmd {
-						default:
-							log.Printf("[red]Not a valid command: \"%s\"[white]\n", cmd)
+						if url, err := url.Parse(commandString); err == nil {
+							switch url.Scheme {
+							case "gopher":
+								client.GotoUrl(commandString)
+							default:
+							}
+						} else {
+							switch cmd {
+							default:
+								log.Printf("[red]Not a valid command: \"%s\"[white]\n", cmd)
+							}
 						}
 					}
 				}
-				grid_layout.RemoveItem(commandLine)
-				grid_layout.AddItem(messageLine, 2, 0, 1, 1, 0, 0, false)
-				app.SetFocus(textView)
 			})
-			grid_layout.RemoveItem(messageLine)
-			grid_layout.AddItem(commandLine, 2, 0, 1, 1, 0, 0, true)
-			app.SetFocus(commandLine)
 			return nil
 		case '\\': // Log view page
 			logView := tview.NewTextView().
@@ -280,8 +295,25 @@ func main() {
 			if (event.Rune()) == rune(i+48) {
 				current_page := historyManager.CurrentPage()
 				if len(current_page.Links) >= i {
-					url := current_page.Links[i-1]
-					client.GotoUrl(url)
+					link := current_page.Links[i-1]
+					if link.Type == GopherQuery {
+						// get input
+						BuildCommandLine("Query: ", func(commandLine *tview.InputField, key tcell.Key) {
+							// This is pretty gross...
+							search_term := commandLine.GetText()
+							link_url, err := url.Parse(link.Url)
+							if err != nil {
+								return
+							}
+							path := "/1/" + link_url.Path[3:]
+							query_url := fmt.Sprintf("%s://%s%s%%09%s",
+								link_url.Scheme, link_url.Host, path, search_term)
+							client.GotoUrl(query_url)
+						})
+
+					} else {
+						client.GotoUrl(link.Url)
+					}
 					return nil
 				}
 			}

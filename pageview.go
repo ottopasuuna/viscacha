@@ -22,7 +22,7 @@ func (pageview *PageView) Clear() {
 
 func (pageview *PageView) RenderPage(page *Page) {
 	pageview.Clear()
-	fmt.Fprintf(pageview.StatusLine, page.Url)
+	fmt.Fprintln(pageview.StatusLine, page.Url)
 	switch page.Type {
 	case TextType:
 		pageview.RenderTextFile(page)
@@ -64,6 +64,8 @@ func (pageview *PageView) RenderGopherDirectory(page *Page) {
 			txt_color = "[white]"
 		case gopher.DIRECTORY:
 			txt_color = "[skyblue]"
+		case gopher.INDEXSEARCH:
+			txt_color = "[violet]"
 		default:
 			txt_color = "[red]"
 		}

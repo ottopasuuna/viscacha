@@ -20,7 +20,7 @@ func GopherHandler(url string) (Page, bool) {
 		return Page{}, false
 	}
 	var content string
-	var links []string
+	var links []*Link
 	if content_type == TextType {
 		body_txt, err := ioutil.ReadAll(res.Body)
 		if err != nil {
@@ -52,11 +52,16 @@ func gopherItemToUrl(item *gopher.Item) string {
 	return url
 }
 
-func gopherMakeLinkMap(dir *gopher.Directory) []string {
-	var link_map []string
+func gopherMakeLinkMap(dir *gopher.Directory) []*Link {
+	var link_map []*Link
 	for _, item := range dir.Items {
 		if item.Type != gopher.INFO {
-			link_map = append(link_map, gopherItemToUrl(item))
+			content_type, ok := Gopher_to_content_type[item.Type]
+			if !ok {
+				continue // TODO
+			}
+			link_map = append(link_map, &Link{Type: content_type,
+				Url: gopherItemToUrl(item)})
 		}
 	}
 	return link_map
