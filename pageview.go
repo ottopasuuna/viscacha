@@ -35,7 +35,9 @@ func (pageview *PageView) RenderPage(page *Page) {
 }
 
 func (pageview *PageView) RenderTextFile(page *Page) {
-	fmt.Fprintf(pageview.PageText, page.Content)
+	content := strings.ReplaceAll(page.Content, "%", "%%")
+	content = tview.Escape(content)
+	fmt.Fprintf(pageview.PageText, content)
 	pageview.PageText.ScrollTo(page.ScrollOffset, 0)
 }
 
@@ -69,7 +71,7 @@ func (pageview *PageView) RenderGopherDirectory(page *Page) {
 		default:
 			txt_color = "[red]"
 		}
-		fmt.Fprintf(textview, "%s%s\n[white]", txt_color, item.Description)
+		fmt.Fprintf(textview, "%s%s\n[white]", txt_color, tview.Escape(item.Description))
 	}
 	pageview.PageText.ScrollTo(page.ScrollOffset, 0)
 }
