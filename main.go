@@ -73,34 +73,247 @@ func (manager *HistoryManager) CurrentPage() *Page {
 }
 
 type Client struct {
-	pageView       *PageView
-	historyManager *HistoryManager
-	messageLine    *tview.TextView
-	app            *tview.Application
+	PageView       *PageView
+	HistoryManager *HistoryManager
+	MessageLine    *tview.TextView
+	App            *tview.Application
+	GridLayout     *tview.Grid
+	LogHandler     *LogMessageHandler
+}
+
+func NewClient() *Client {
+	app := tview.NewApplication()
+
+	pageView := NewPageView()
+	textView := pageView.PageText
+	statusLine := pageView.StatusLine
+
+	messageLine := tview.NewTextView().
+		SetDynamicColors(true)
+	messageLine.SetChangedFunc(func() {
+		app.Draw()
+	})
+
+	gridLayout := tview.NewGrid().
+		SetRows(0, 1, 1).
+		SetColumns(0).
+		SetBorders(false)
+
+	gridLayout.AddItem(textView, 0, 0, 1, 1, 0, 0, true)
+	gridLayout.AddItem(statusLine, 1, 0, 1, 1, 0, 0, false)
+	gridLayout.AddItem(messageLine, 2, 0, 1, 1, 0, 0, false)
+
+	app.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		switch event.Rune() {
+		case 'q':
+			app.Stop()
+			return nil
+		}
+		return event
+	})
+	app.SetRoot(gridLayout, true).SetFocus(textView)
+
+	client := Client{
+		PageView:       pageView,
+		HistoryManager: &HistoryManager{},
+		MessageLine:    messageLine,
+		App:            app,
+		GridLayout:     gridLayout,
+	}
+	textView.SetInputCapture(client.PageInputHandler)
+	return &client
+}
+
+func (c *Client) BuildCommandLine(label string, handler func(commandLine *tview.InputField, key tcell.Key)) {
+	commandLine := tview.NewInputField().
+		SetLabel(label)
+	commandLine.SetDoneFunc(func(key tcell.Key) {
+		handler(commandLine, key)
+		c.GridLayout.RemoveItem(commandLine)
+		c.GridLayout.AddItem(c.MessageLine, 2, 0, 1, 1, 0, 0, false)
+		c.App.SetFocus(c.PageView.PageText)
+	})
+	c.GridLayout.RemoveItem(c.MessageLine)
+	c.GridLayout.AddItem(commandLine, 2, 0, 1, 1, 0, 0, true)
+	c.App.SetFocus(commandLine)
 }
 
 func (client *Client) GotoUrl(url string) {
 	client.SaveScroll()
-	fmt.Fprintln(client.messageLine, "Loading...")
+	fmt.Fprintln(client.MessageLine, "Loading...")
 	go func() {
 		page, success := GopherHandler(url)
 		if !success {
 			log.Println("Failed to get gopher url")
 		}
-		client.app.QueueUpdateDraw(func() {
-			client.pageView.RenderPage(&page)
-			client.historyManager.Navigate(&page)
-			client.messageLine.Clear()
+		client.App.QueueUpdateDraw(func() {
+			client.PageView.RenderPage(&page)
+			client.HistoryManager.Navigate(&page)
+			client.MessageLine.Clear()
 		})
 	}()
 }
 
 func (client *Client) SaveScroll() {
-	page := client.historyManager.CurrentPage()
+	page := client.HistoryManager.CurrentPage()
 	if page != nil {
-		row, _ := client.pageView.PageText.GetScrollOffset()
+		row, _ := client.PageView.PageText.GetScrollOffset()
 		page.ScrollOffset = row
 	}
+}
+
+func (c *Client) PageInputHandler(event *tcell.EventKey) *tcell.EventKey {
+	if c.MessageLine.GetText(true) != "Loading...\n" {
+		c.MessageLine.Clear()
+	}
+	switch event.Rune() {
+	case 'k':
+		curr_row, _ := c.PageView.PageText.GetScrollOffset()
+		scrollDest := curr_row - 1
+		if scrollDest <= 0 {
+			scrollDest = 0
+		}
+		c.PageView.PageText.ScrollTo(scrollDest, 0)
+		c.PageView.UpdateStatus()
+		return nil
+	case 'j':
+		curr_row, _ := c.PageView.PageText.GetScrollOffset()
+		scrollDest := curr_row + 1
+		bottom := c.PageView.NumLines()
+		if scrollDest >= bottom {
+			scrollDest = bottom
+		}
+		c.PageView.PageText.ScrollTo(scrollDest, 0)
+		c.PageView.UpdateStatus()
+		return nil
+	case 'g':
+		c.PageView.PageText.ScrollToBeginning()
+		c.PageView.UpdateStatus()
+		return nil
+	case 'G':
+		c.PageView.PageText.ScrollToEnd()
+		c.PageView.UpdateStatus()
+		return nil
+	case 'd':
+		_, _, _, height := c.PageView.PageText.GetRect()
+		curr_row, _ := c.PageView.PageText.GetScrollOffset()
+		scrollDest := curr_row + height/2
+		bottom := c.PageView.NumLines()
+		if scrollDest >= bottom {
+			scrollDest = bottom
+		}
+		c.PageView.PageText.ScrollTo(scrollDest, 0)
+		c.PageView.UpdateStatus()
+		return nil
+	case 'u':
+		_, _, _, height := c.PageView.PageText.GetRect()
+		curr_row, _ := c.PageView.PageText.GetScrollOffset()
+		scrollDest := curr_row - height/2
+		if scrollDest <= 0 {
+			scrollDest = 0
+		}
+		c.PageView.PageText.ScrollTo(scrollDest, 0)
+		c.PageView.UpdateStatus()
+		return nil
+	case 'h':
+		c.SaveScroll()
+		prev_page := c.HistoryManager.Back()
+		if prev_page != nil {
+			c.PageView.RenderPage(prev_page)
+		} else {
+			log.Println("Already at first page")
+		}
+		return nil
+	case 'l':
+		c.SaveScroll()
+		next_page := c.HistoryManager.Forward()
+		if next_page != nil {
+			c.PageView.RenderPage(next_page)
+		} else {
+			log.Println("Already at last page")
+		}
+		return nil
+	case ':':
+		// Open command line
+		c.BuildCommandLine(": ", func(commandLine *tview.InputField, key tcell.Key) {
+			if key == tcell.KeyEnter {
+				// Dispatch command
+				commandString := commandLine.GetText()
+				cmd := strings.Split(commandString, " ")[0]
+				if link_num, err := strconv.ParseInt(cmd, 10, 32); err == nil {
+					current_page := c.HistoryManager.CurrentPage()
+					if link_num > 0 && int(link_num) <= len(current_page.Links) {
+						url := current_page.Links[link_num-1].Url
+						c.GotoUrl(url)
+					} else {
+						log.Printf("[red]No link #%d on the current page[white]\n", link_num)
+					}
+				} else if url, err := url.Parse(commandString); err == nil {
+					switch url.Scheme {
+					case "gopher":
+						c.GotoUrl(commandString)
+					default:
+						log.Printf("[red]protocol \"%s\" not supported\n", url.Scheme)
+					}
+				} else {
+					switch cmd {
+					default:
+						log.Printf("[red]Not a valid command: \"%s\"[white]\n", cmd)
+					}
+				}
+			}
+		})
+		return nil
+	case '\\': // Log view page
+		if c.LogHandler != nil {
+			logView := tview.NewTextView().
+				SetChangedFunc(func() {
+					c.App.Draw()
+				})
+			logView.SetBorder(true)
+			logView.SetTitle("Log Messages")
+			logView.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+				if event.Rune() == '\\' {
+					c.App.SetRoot(c.GridLayout, true).SetFocus(c.PageView.PageText)
+					return nil
+				}
+				return event
+			})
+			fmt.Fprintf(logView, c.LogHandler.Text)
+			c.App.SetRoot(logView, true).SetFocus(logView)
+			return nil
+		}
+	}
+
+	// Bind number keys to quick select links
+	for i := 1; i <= 9; i++ {
+		if (event.Rune()) == rune(i+48) {
+			current_page := c.HistoryManager.CurrentPage()
+			if len(current_page.Links) >= i {
+				link := current_page.Links[i-1]
+				if link.Type == GopherQuery {
+					// get input
+					c.BuildCommandLine("Query: ", func(commandLine *tview.InputField, key tcell.Key) {
+						// This is pretty gross...
+						search_term := commandLine.GetText()
+						link_url, err := url.Parse(link.Url)
+						if err != nil {
+							return
+						}
+						path := "/1/" + link_url.Path[3:]
+						query_url := fmt.Sprintf("%s://%s%s%%09%s",
+							link_url.Scheme, link_url.Host, path, search_term)
+						c.GotoUrl(query_url)
+					})
+
+				} else {
+					c.GotoUrl(link.Url)
+				}
+				return nil
+			}
+		}
+	}
+	return event
 }
 
 type LogMessageHandler struct {
@@ -135,40 +348,7 @@ func main() {
 	}
 
 	// Build tview Application UI
-	app := tview.NewApplication()
-
-	pageView := NewPageView()
-	textView := pageView.PageText
-	statusLine := pageView.StatusLine
-
-	messageLine := tview.NewTextView().
-		SetDynamicColors(true)
-	messageLine.SetChangedFunc(func() {
-		app.Draw()
-	})
-
-	grid_layout := tview.NewGrid().
-		SetRows(0, 1, 1).
-		SetColumns(0).
-		SetBorders(false)
-
-	grid_layout.AddItem(textView, 0, 0, 1, 1, 0, 0, true)
-	grid_layout.AddItem(statusLine, 1, 0, 1, 1, 0, 0, false)
-	grid_layout.AddItem(messageLine, 2, 0, 1, 1, 0, 0, false)
-
-	BuildCommandLine := func(label string, handler func(commandLine *tview.InputField, key tcell.Key)) {
-		commandLine := tview.NewInputField().
-			SetLabel(label)
-		commandLine.SetDoneFunc(func(key tcell.Key) {
-			handler(commandLine, key)
-			grid_layout.RemoveItem(commandLine)
-			grid_layout.AddItem(messageLine, 2, 0, 1, 1, 0, 0, false)
-			app.SetFocus(textView)
-		})
-		grid_layout.RemoveItem(messageLine)
-		grid_layout.AddItem(commandLine, 2, 0, 1, 1, 0, 0, true)
-		app.SetFocus(commandLine)
-	}
+	client := NewClient()
 
 	// Setup log file handling
 	logFile, err := os.Create(DEFAULT_LOG_PATH)
@@ -178,193 +358,23 @@ func main() {
 		defer logFile.Close()
 	}
 	var logHandler = LogMessageHandler{
-		MessageLine: messageLine,
+		MessageLine: client.MessageLine,
 		Text:        "",
 		LogFile:     logFile,
 	}
 	log.SetOutput(&logHandler)
+	client.LogHandler = &logHandler
 
 	// Go to a URL
-	historyManager := HistoryManager{}
-
-	client := Client{
-		pageView:       pageView,
-		historyManager: &historyManager,
-		messageLine:    messageLine,
-		app:            app,
-	}
-
 	client.GotoUrl(init_url)
 	time.AfterFunc(50*time.Millisecond, func() {
 		// Hacks to get UpdateStatus to detect the correct terminal width on startup
-		app.QueueUpdateDraw(func() {
-			pageView.UpdateStatus()
+		client.App.QueueUpdateDraw(func() {
+			client.PageView.UpdateStatus()
 		})
 	})
 
-	// Set input handler for top level app
-	app.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		switch event.Rune() {
-		case 'q':
-			app.Stop()
-			return nil
-		}
-		return event
-	})
-
-	// Set custom input handler for main view
-	textView.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		if messageLine.GetText(true) != "Loading...\n" {
-			messageLine.Clear()
-		}
-		switch event.Rune() {
-		case 'k':
-			curr_row, _ := textView.GetScrollOffset()
-			scrollDest := curr_row - 1
-			if scrollDest <= 0 {
-				scrollDest = 0
-			}
-			textView.ScrollTo(scrollDest, 0)
-			pageView.UpdateStatus()
-			return nil
-		case 'j':
-			curr_row, _ := textView.GetScrollOffset()
-			scrollDest := curr_row + 1
-			bottom := pageView.NumLines()
-			if scrollDest >= bottom {
-				scrollDest = bottom
-			}
-			textView.ScrollTo(scrollDest, 0)
-			pageView.UpdateStatus()
-			return nil
-		case 'g':
-			textView.ScrollToBeginning()
-			pageView.UpdateStatus()
-			return nil
-		case 'G':
-			textView.ScrollToEnd()
-			pageView.UpdateStatus()
-			return nil
-		case 'd':
-			_, _, _, height := textView.GetRect()
-			curr_row, _ := textView.GetScrollOffset()
-			scrollDest := curr_row + height/2
-			bottom := pageView.NumLines()
-			if scrollDest >= bottom {
-				scrollDest = bottom
-			}
-			textView.ScrollTo(scrollDest, 0)
-			pageView.UpdateStatus()
-			return nil
-		case 'u':
-			_, _, _, height := textView.GetRect()
-			curr_row, _ := textView.GetScrollOffset()
-			scrollDest := curr_row - height/2
-			if scrollDest <= 0 {
-				scrollDest = 0
-			}
-			textView.ScrollTo(scrollDest, 0)
-			pageView.UpdateStatus()
-			return nil
-		case 'h':
-			client.SaveScroll()
-			prev_page := historyManager.Back()
-			if prev_page != nil {
-				pageView.RenderPage(prev_page)
-			} else {
-				log.Println("Already at first page")
-			}
-			return nil
-		case 'l':
-			client.SaveScroll()
-			next_page := historyManager.Forward()
-			if next_page != nil {
-				pageView.RenderPage(next_page)
-			} else {
-				log.Println("Already at last page")
-			}
-			return nil
-		case ':':
-			// Open command line
-			BuildCommandLine(": ", func(commandLine *tview.InputField, key tcell.Key) {
-				if key == tcell.KeyEnter {
-					// Dispatch command
-					commandString := commandLine.GetText()
-					cmd := strings.Split(commandString, " ")[0]
-					if link_num, err := strconv.ParseInt(cmd, 10, 32); err == nil {
-						current_page := historyManager.CurrentPage()
-						if link_num > 0 && int(link_num) <= len(current_page.Links) {
-							url := current_page.Links[link_num-1].Url
-							client.GotoUrl(url)
-						} else {
-							log.Printf("[red]No link #%d on the current page[white]\n", link_num)
-						}
-					} else if url, err := url.Parse(commandString); err == nil {
-						switch url.Scheme {
-						case "gopher":
-							client.GotoUrl(commandString)
-						default:
-							log.Printf("[red]protocol \"%s\" not supported\n", url.Scheme)
-						}
-					} else {
-						switch cmd {
-						default:
-							log.Printf("[red]Not a valid command: \"%s\"[white]\n", cmd)
-						}
-					}
-				}
-			})
-			return nil
-		case '\\': // Log view page
-			logView := tview.NewTextView().
-				SetChangedFunc(func() {
-					app.Draw()
-				})
-			logView.SetBorder(true)
-			logView.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-				if event.Rune() == '\\' {
-					app.SetRoot(grid_layout, true).SetFocus(textView)
-					return nil
-				}
-				return event
-			})
-			fmt.Fprintf(logView, logHandler.Text)
-			app.SetRoot(logView, true).SetFocus(logView)
-			return nil
-		}
-
-		// Bind number keys to quick select links
-		for i := 1; i <= 9; i++ {
-			if (event.Rune()) == rune(i+48) {
-				current_page := historyManager.CurrentPage()
-				if len(current_page.Links) >= i {
-					link := current_page.Links[i-1]
-					if link.Type == GopherQuery {
-						// get input
-						BuildCommandLine("Query: ", func(commandLine *tview.InputField, key tcell.Key) {
-							// This is pretty gross...
-							search_term := commandLine.GetText()
-							link_url, err := url.Parse(link.Url)
-							if err != nil {
-								return
-							}
-							path := "/1/" + link_url.Path[3:]
-							query_url := fmt.Sprintf("%s://%s%s%%09%s",
-								link_url.Scheme, link_url.Host, path, search_term)
-							client.GotoUrl(query_url)
-						})
-
-					} else {
-						client.GotoUrl(link.Url)
-					}
-					return nil
-				}
-			}
-		}
-		return event
-	})
-
-	if err := app.SetRoot(grid_layout, true).SetFocus(textView).Run(); err != nil {
+	if err := client.App.Run(); err != nil {
 		panic(err)
 	}
 }
