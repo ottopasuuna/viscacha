@@ -38,9 +38,14 @@ func (pageview *PageView) getPercentScroll() float64 {
 	_, _, _, height := pageview.PageText.GetRect()
 	row, _ := pageview.PageText.GetScrollOffset()
 	viewBottom := row + height
-	numLines := len(strings.Split(pageview.PageText.GetText(true), "\n"))
+	numLines := pageview.NumLines()
 	percentViewed := math.Min(1.0, float64(viewBottom)/float64(numLines))
 	return percentViewed * 100
+}
+
+func (pageview *PageView) NumLines() int {
+	numLines := len(strings.Split(pageview.PageText.GetText(true), "\n"))
+	return numLines
 }
 
 func (p *PageView) UpdateStatus() {

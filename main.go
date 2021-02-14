@@ -75,16 +75,24 @@ func (manager *HistoryManager) CurrentPage() *Page {
 type Client struct {
 	pageView       *PageView
 	historyManager *HistoryManager
+	messageLine    *tview.TextView
+	app            *tview.Application
 }
 
 func (client *Client) GotoUrl(url string) {
 	client.SaveScroll()
-	page, success := GopherHandler(url)
-	if !success {
-		log.Println("Failed to get gopher url")
-	}
-	client.pageView.RenderPage(&page)
-	client.historyManager.Navigate(&page)
+	fmt.Fprintln(client.messageLine, "Loading...")
+	go func() {
+		page, success := GopherHandler(url)
+		if !success {
+			log.Println("Failed to get gopher url")
+		}
+		client.app.QueueUpdateDraw(func() {
+			client.pageView.RenderPage(&page)
+			client.historyManager.Navigate(&page)
+			client.messageLine.Clear()
+		})
+	}()
 }
 
 func (client *Client) SaveScroll() {
@@ -137,10 +145,6 @@ func main() {
 		SetDynamicColors(true)
 	messageLine.SetChangedFunc(func() {
 		app.Draw()
-		time.AfterFunc(3*time.Second, func() {
-			messageLine.Clear()
-			app.Draw()
-		})
 	})
 
 	grid_layout := tview.NewGrid().
@@ -186,6 +190,8 @@ func main() {
 	client := Client{
 		pageView:       pageView,
 		historyManager: &historyManager,
+		messageLine:    messageLine,
+		app:            app,
 	}
 
 	client.GotoUrl(init_url)
@@ -194,7 +200,6 @@ func main() {
 		app.QueueUpdateDraw(func() {
 			pageView.UpdateStatus()
 		})
-		// app.Draw()
 	})
 
 	// Set input handler for top level app
@@ -209,15 +214,27 @@ func main() {
 
 	// Set custom input handler for main view
 	textView.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		if messageLine.GetText(true) != "Loading...\n" {
+			messageLine.Clear()
+		}
 		switch event.Rune() {
 		case 'k':
 			curr_row, _ := textView.GetScrollOffset()
-			textView.ScrollTo(curr_row-1, 0)
+			scrollDest := curr_row - 1
+			if scrollDest <= 0 {
+				scrollDest = 0
+			}
+			textView.ScrollTo(scrollDest, 0)
 			pageView.UpdateStatus()
 			return nil
 		case 'j':
 			curr_row, _ := textView.GetScrollOffset()
-			textView.ScrollTo(curr_row+1, 0)
+			scrollDest := curr_row + 1
+			bottom := pageView.NumLines()
+			if scrollDest >= bottom {
+				scrollDest = bottom
+			}
+			textView.ScrollTo(scrollDest, 0)
 			pageView.UpdateStatus()
 			return nil
 		case 'g':
@@ -231,13 +248,22 @@ func main() {
 		case 'd':
 			_, _, _, height := textView.GetRect()
 			curr_row, _ := textView.GetScrollOffset()
-			textView.ScrollTo(curr_row+height/2, 0)
+			scrollDest := curr_row + height/2
+			bottom := pageView.NumLines()
+			if scrollDest >= bottom {
+				scrollDest = bottom
+			}
+			textView.ScrollTo(scrollDest, 0)
 			pageView.UpdateStatus()
 			return nil
 		case 'u':
 			_, _, _, height := textView.GetRect()
 			curr_row, _ := textView.GetScrollOffset()
-			textView.ScrollTo(curr_row-height/2, 0)
+			scrollDest := curr_row - height/2
+			if scrollDest <= 0 {
+				scrollDest = 0
+			}
+			textView.ScrollTo(scrollDest, 0)
 			pageView.UpdateStatus()
 			return nil
 		case 'h':
