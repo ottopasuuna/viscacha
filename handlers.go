@@ -58,7 +58,7 @@ func gopherMakeLinkMap(dir *gopher.Directory) []*Link {
 		if item.Type != gopher.INFO {
 			content_type, ok := Gopher_to_content_type[item.Type]
 			if !ok {
-				continue // TODO
+				content_type = UnknownType
 			}
 			link_map = append(link_map, &Link{Type: content_type,
 				Url: gopherItemToUrl(item)})

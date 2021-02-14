@@ -10,6 +10,7 @@ const (
 	TextType = iota
 	GopherDirectory
 	GopherQuery
+	UnknownType
 )
 
 var Gopher_to_content_type = map[gopher.ItemType]ContentType{

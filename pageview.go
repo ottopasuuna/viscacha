@@ -6,6 +6,7 @@ import (
 	"math"
 	"strings"
 
+	"github.com/gdamore/tcell/v2"
 	"github.com/prologic/go-gopher"
 	"github.com/rivo/tview"
 )
@@ -13,6 +14,46 @@ import (
 type PageView struct {
 	PageText   *tview.TextView
 	StatusLine *tview.TextView
+	currentUrl string
+}
+
+func NewPageView() *PageView {
+	textView := tview.NewTextView().
+		SetDynamicColors(true).
+		SetRegions(true).
+		SetWordWrap(true)
+	textView.SetBorder(false)
+
+	statusLine := tview.NewTextView()
+	statusLine.SetTextColor(tcell.GetColor("black"))
+	statusLine.SetBackgroundColor(tcell.GetColor("white"))
+	pageview := &PageView{
+		PageText:   textView,
+		StatusLine: statusLine,
+	}
+	return pageview
+}
+
+func (pageview *PageView) getPercentScroll() float64 {
+	_, _, _, height := pageview.PageText.GetRect()
+	row, _ := pageview.PageText.GetScrollOffset()
+	viewBottom := row + height
+	numLines := len(strings.Split(pageview.PageText.GetText(true), "\n"))
+	percentViewed := math.Min(1.0, float64(viewBottom)/float64(numLines))
+	return percentViewed * 100
+}
+
+func (p *PageView) UpdateStatus() {
+	p.StatusLine.Clear()
+	pctString := p.getPercentScroll()
+	_, _, width, _ := p.StatusLine.GetRect()
+	available_for_url := width - 5
+	urlString := p.currentUrl
+	if len(urlString) > available_for_url {
+		urlString = urlString[:available_for_url]
+	}
+	padding := strings.Repeat(" ", available_for_url-len(urlString))
+	fmt.Fprintf(p.StatusLine, "%s%s %3d%%", urlString, padding, int(pctString))
 }
 
 func (pageview *PageView) Clear() {
@@ -22,7 +63,7 @@ func (pageview *PageView) Clear() {
 
 func (pageview *PageView) RenderPage(page *Page) {
 	pageview.Clear()
-	fmt.Fprintln(pageview.StatusLine, page.Url)
+	pageview.currentUrl = page.Url
 	switch page.Type {
 	case TextType:
 		pageview.RenderTextFile(page)
@@ -32,6 +73,7 @@ func (pageview *PageView) RenderPage(page *Page) {
 		fmt.Fprintf(pageview.PageText, "[red] page type not recognized \"%d\"[white]", page.Type)
 		log.Printf("[red] page type not recognized \"%d\"[white]\n", page.Type)
 	}
+	pageview.UpdateStatus()
 }
 
 func (pageview *PageView) RenderTextFile(page *Page) {

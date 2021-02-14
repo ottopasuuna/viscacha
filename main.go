@@ -122,24 +122,16 @@ func main() {
 	// Parse cli arguments:
 	flag.Parse()
 	var init_url = flag.Arg(0)
-	fmt.Println(init_url)
 	if init_url == "" {
 		init_url = HOME_PAGE
 	}
 
 	// Build tview Application UI
 	app := tview.NewApplication()
-	textView := tview.NewTextView().
-		SetDynamicColors(true).
-		SetRegions(true).
-		SetChangedFunc(func() {
-			app.Draw()
-		})
-	textView.SetBorder(false)
 
-	statusLine := tview.NewTextView()
-	statusLine.SetTextColor(tcell.GetColor("black"))
-	statusLine.SetBackgroundColor(tcell.GetColor("white"))
+	pageView := NewPageView()
+	textView := pageView.PageText
+	statusLine := pageView.StatusLine
 
 	messageLine := tview.NewTextView().
 		SetDynamicColors(true)
@@ -174,11 +166,6 @@ func main() {
 		app.SetFocus(commandLine)
 	}
 
-	pageView := PageView{
-		PageText:   textView,
-		StatusLine: statusLine,
-	}
-
 	// Setup log file handling
 	logFile, err := os.Create(DEFAULT_LOG_PATH)
 	if err != nil {
@@ -197,11 +184,18 @@ func main() {
 	historyManager := HistoryManager{}
 
 	client := Client{
-		pageView:       &pageView,
+		pageView:       pageView,
 		historyManager: &historyManager,
 	}
 
 	client.GotoUrl(init_url)
+	time.AfterFunc(50*time.Millisecond, func() {
+		// Hacks to get UpdateStatus to detect the correct terminal width on startup
+		app.QueueUpdateDraw(func() {
+			pageView.UpdateStatus()
+		})
+		// app.Draw()
+	})
 
 	// Set input handler for top level app
 	app.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
@@ -216,15 +210,35 @@ func main() {
 	// Set custom input handler for main view
 	textView.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		switch event.Rune() {
+		case 'k':
+			curr_row, _ := textView.GetScrollOffset()
+			textView.ScrollTo(curr_row-1, 0)
+			pageView.UpdateStatus()
+			return nil
+		case 'j':
+			curr_row, _ := textView.GetScrollOffset()
+			textView.ScrollTo(curr_row+1, 0)
+			pageView.UpdateStatus()
+			return nil
+		case 'g':
+			textView.ScrollToBeginning()
+			pageView.UpdateStatus()
+			return nil
+		case 'G':
+			textView.ScrollToEnd()
+			pageView.UpdateStatus()
+			return nil
 		case 'd':
 			_, _, _, height := textView.GetRect()
 			curr_row, _ := textView.GetScrollOffset()
 			textView.ScrollTo(curr_row+height/2, 0)
+			pageView.UpdateStatus()
 			return nil
 		case 'u':
 			_, _, _, height := textView.GetRect()
 			curr_row, _ := textView.GetScrollOffset()
 			textView.ScrollTo(curr_row-height/2, 0)
+			pageView.UpdateStatus()
 			return nil
 		case 'h':
 			client.SaveScroll()
@@ -253,20 +267,23 @@ func main() {
 					cmd := strings.Split(commandString, " ")[0]
 					if link_num, err := strconv.ParseInt(cmd, 10, 32); err == nil {
 						current_page := historyManager.CurrentPage()
-						url := current_page.Links[link_num-1].Url
-						client.GotoUrl(url)
-					} else {
-						if url, err := url.Parse(commandString); err == nil {
-							switch url.Scheme {
-							case "gopher":
-								client.GotoUrl(commandString)
-							default:
-							}
+						if link_num > 0 && int(link_num) <= len(current_page.Links) {
+							url := current_page.Links[link_num-1].Url
+							client.GotoUrl(url)
 						} else {
-							switch cmd {
-							default:
-								log.Printf("[red]Not a valid command: \"%s\"[white]\n", cmd)
-							}
+							log.Printf("[red]No link #%d on the current page[white]\n", link_num)
+						}
+					} else if url, err := url.Parse(commandString); err == nil {
+						switch url.Scheme {
+						case "gopher":
+							client.GotoUrl(commandString)
+						default:
+							log.Printf("[red]protocol \"%s\" not supported\n", url.Scheme)
+						}
+					} else {
+						switch cmd {
+						default:
+							log.Printf("[red]Not a valid command: \"%s\"[white]\n", cmd)
 						}
 					}
 				}
