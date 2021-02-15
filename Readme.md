@@ -1,6 +1,6 @@
 ## :warning: Work in Progress
 
-# Marmot Browser
+# Viscacha Browser
 A colorfull, terminal based Gopher browser with Vim like bindings.
 Inspired by bombadillo and amfora, sort of a combination of the two.
 

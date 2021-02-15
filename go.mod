@@ -1,4 +1,4 @@
-module github.com/ottopasuuna/marmot
+module github.com/ottopasuuna/viscacha
 
 go 1.15
 
