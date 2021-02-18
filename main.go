@@ -80,7 +80,8 @@ type Client struct {
 	App            *tview.Application
 	GridLayout     *tview.Grid
 	LogHandler     *LogMessageHandler
-	cli_lock       sync.Mutex // For ensuring only one MessageLine input field open at a time
+	cli_lock       sync.Mutex      // For ensuring only one MessageLine input field open at a time
+	active_view    tview.Primitive // Keep track of the widget to give focus back to
 }
 
 func NewClient() *Client {
@@ -121,6 +122,7 @@ func NewClient() *Client {
 		MessageLine:    messageLine,
 		App:            app,
 		GridLayout:     gridLayout,
+		active_view:    pageView.PageText,
 	}
 	textView.SetInputCapture(client.PageInputHandler)
 	return &client
@@ -128,6 +130,7 @@ func NewClient() *Client {
 
 func (c *Client) BuildCommandLine(label string, handler func(commandLine *tview.InputField, key tcell.Key)) {
 	go func() {
+		log.Println("Lock aquired")
 		c.cli_lock.Lock()
 		c.App.QueueUpdateDraw(func() {
 			commandLine := tview.NewInputField().
@@ -136,13 +139,14 @@ func (c *Client) BuildCommandLine(label string, handler func(commandLine *tview.
 				handler(commandLine, key)
 				c.GridLayout.RemoveItem(commandLine)
 				c.GridLayout.AddItem(c.MessageLine, 2, 0, 1, 1, 0, 0, false)
-				c.App.SetFocus(c.PageView.PageText)
+				c.App.SetFocus(c.active_view)
+				c.cli_lock.Unlock()
+				log.Println("unlocked")
 			})
 			c.GridLayout.RemoveItem(c.MessageLine)
 			c.GridLayout.AddItem(commandLine, 2, 0, 1, 1, 0, 0, true)
 			c.App.SetFocus(commandLine)
 		})
-		c.cli_lock.Unlock()
 	}()
 }
 
@@ -224,22 +228,13 @@ func (c *Client) PageInputHandler(event *tcell.EventKey) *tcell.EventKey {
 		c.PageView.UpdateStatus()
 		return nil
 	case 'h':
-		c.SaveScroll()
-		prev_page := c.HistoryManager.Back()
-		if prev_page != nil {
-			c.PageView.RenderPage(prev_page)
-		} else {
-			log.Println("Already at first page")
-		}
+		c.CommandBack()
 		return nil
 	case 'l':
-		c.SaveScroll()
-		next_page := c.HistoryManager.Forward()
-		if next_page != nil {
-			c.PageView.RenderPage(next_page)
-		} else {
-			log.Println("Already at last page")
-		}
+		c.CommandForward()
+		return nil
+	case '\\': // Log view page
+		c.CommandViewLogs()
 		return nil
 	case ':':
 		// Open command line
@@ -248,46 +243,32 @@ func (c *Client) PageInputHandler(event *tcell.EventKey) *tcell.EventKey {
 				// Dispatch command
 				commandString := commandLine.GetText()
 				cmd := strings.Split(commandString, " ")[0]
-				if link_num, err := strconv.ParseInt(cmd, 10, 32); err == nil {
-					current_page := c.HistoryManager.CurrentPage()
-					c.FollowLink(current_page, int(link_num))
-				} else if url, err := url.Parse(commandString); err == nil {
-					switch url.Scheme {
-					case "gopher":
-						c.GotoUrl(commandString)
-					default:
-						log.Printf("[red]protocol \"%s\" not supported\n", url.Scheme)
-					}
-				} else {
-					switch cmd {
-					default:
+				switch cmd {
+				case "back":
+					c.CommandBack()
+				case "forward":
+					c.CommandForward()
+				case "showlogs":
+					c.CommandViewLogs()
+				default: // Either a URL or a link number
+					if link_num, err := strconv.ParseInt(cmd, 10, 32); err == nil {
+						current_page := c.HistoryManager.CurrentPage()
+						c.FollowLink(current_page, int(link_num))
+					} else if url, err := url.Parse(commandString); err == nil {
+						switch url.Scheme {
+						case "gopher":
+							c.GotoUrl(commandString)
+						default:
+							log.Printf("[red]protocol \"%s\" not supported\n", url.Scheme)
+						}
+					} else {
 						log.Printf("[red]Not a valid command: \"%s\"[white]\n", cmd)
 					}
 				}
 			}
 		})
 		return nil
-	case '\\': // Log view page
-		if c.LogHandler != nil {
-			logView := tview.NewTextView().
-				SetChangedFunc(func() {
-					c.App.Draw()
-				})
-			logView.SetBorder(true)
-			logView.SetTitle("Log Messages")
-			logView.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-				if event.Rune() == '\\' {
-					c.App.SetRoot(c.GridLayout, true).SetFocus(c.PageView.PageText)
-					return nil
-				}
-				return event
-			})
-			fmt.Fprintf(logView, c.LogHandler.Text)
-			c.App.SetRoot(logView, true).SetFocus(logView)
-			return nil
-		}
 	}
-
 	// Bind number keys to quick select links
 	for i := 1; i <= 9; i++ {
 		if (event.Rune()) == rune(i+48) {
@@ -317,6 +298,48 @@ func (c *Client) FollowLink(page *Page, link_num int) {
 		}
 	} else {
 		log.Printf("[red]No link #%d on the current page[white]\n", link_num)
+	}
+}
+
+func (c *Client) CommandBack() {
+	c.SaveScroll()
+	prev_page := c.HistoryManager.Back()
+	if prev_page != nil {
+		c.PageView.RenderPage(prev_page)
+	} else {
+		log.Println("Already at first page")
+	}
+}
+
+func (c *Client) CommandForward() {
+	c.SaveScroll()
+	next_page := c.HistoryManager.Forward()
+	if next_page != nil {
+		c.PageView.RenderPage(next_page)
+	} else {
+		log.Println("Already at last page")
+	}
+}
+
+func (c *Client) CommandViewLogs() {
+	if c.LogHandler != nil {
+		logView := tview.NewTextView().
+			SetChangedFunc(func() {
+				c.App.Draw()
+			})
+		logView.SetBorder(true)
+		logView.SetTitle("Log Messages")
+		logView.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+			if event.Rune() == '\\' || event.Key() == tcell.KeyEscape {
+				c.App.SetRoot(c.GridLayout, true).SetFocus(c.PageView.PageText)
+				c.active_view = c.PageView.PageText
+				return nil
+			}
+			return event
+		})
+		fmt.Fprintf(logView, c.LogHandler.Text)
+		c.App.SetRoot(logView, true).SetFocus(logView)
+		c.active_view = logView
 	}
 }
 
