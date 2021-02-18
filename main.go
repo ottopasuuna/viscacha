@@ -9,6 +9,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gdamore/tcell/v2"
@@ -79,6 +80,7 @@ type Client struct {
 	App            *tview.Application
 	GridLayout     *tview.Grid
 	LogHandler     *LogMessageHandler
+	cli_lock       sync.Mutex // For ensuring only one MessageLine input field open at a time
 }
 
 func NewClient() *Client {
@@ -125,17 +127,23 @@ func NewClient() *Client {
 }
 
 func (c *Client) BuildCommandLine(label string, handler func(commandLine *tview.InputField, key tcell.Key)) {
-	commandLine := tview.NewInputField().
-		SetLabel(label)
-	commandLine.SetDoneFunc(func(key tcell.Key) {
-		handler(commandLine, key)
-		c.GridLayout.RemoveItem(commandLine)
-		c.GridLayout.AddItem(c.MessageLine, 2, 0, 1, 1, 0, 0, false)
-		c.App.SetFocus(c.PageView.PageText)
-	})
-	c.GridLayout.RemoveItem(c.MessageLine)
-	c.GridLayout.AddItem(commandLine, 2, 0, 1, 1, 0, 0, true)
-	c.App.SetFocus(commandLine)
+	go func() {
+		c.cli_lock.Lock()
+		c.App.QueueUpdateDraw(func() {
+			commandLine := tview.NewInputField().
+				SetLabel(label)
+			commandLine.SetDoneFunc(func(key tcell.Key) {
+				handler(commandLine, key)
+				c.GridLayout.RemoveItem(commandLine)
+				c.GridLayout.AddItem(c.MessageLine, 2, 0, 1, 1, 0, 0, false)
+				c.App.SetFocus(c.PageView.PageText)
+			})
+			c.GridLayout.RemoveItem(c.MessageLine)
+			c.GridLayout.AddItem(commandLine, 2, 0, 1, 1, 0, 0, true)
+			c.App.SetFocus(commandLine)
+		})
+		c.cli_lock.Unlock()
+	}()
 }
 
 func (client *Client) GotoUrl(url string) {
@@ -242,12 +250,7 @@ func (c *Client) PageInputHandler(event *tcell.EventKey) *tcell.EventKey {
 				cmd := strings.Split(commandString, " ")[0]
 				if link_num, err := strconv.ParseInt(cmd, 10, 32); err == nil {
 					current_page := c.HistoryManager.CurrentPage()
-					if link_num > 0 && int(link_num) <= len(current_page.Links) {
-						url := current_page.Links[link_num-1].Url
-						c.GotoUrl(url)
-					} else {
-						log.Printf("[red]No link #%d on the current page[white]\n", link_num)
-					}
+					c.FollowLink(current_page, int(link_num))
 				} else if url, err := url.Parse(commandString); err == nil {
 					switch url.Scheme {
 					case "gopher":
@@ -289,27 +292,32 @@ func (c *Client) PageInputHandler(event *tcell.EventKey) *tcell.EventKey {
 	for i := 1; i <= 9; i++ {
 		if (event.Rune()) == rune(i+48) {
 			current_page := c.HistoryManager.CurrentPage()
-			if len(current_page.Links) >= i {
-				link := current_page.Links[i-1]
-				if link.Type == GopherQuery {
-					// get input
-					c.BuildCommandLine("Query: ", func(commandLine *tview.InputField, key tcell.Key) {
-						search_term := commandLine.GetText()
-						query_url, err := GopherQueryUrl(link, search_term)
-						if err != nil {
-							return
-						}
-						c.GotoUrl(query_url)
-					})
-
-				} else {
-					c.GotoUrl(link.Url)
-				}
-				return nil
-			}
+			c.FollowLink(current_page, i)
 		}
 	}
 	return event
+}
+
+func (c *Client) FollowLink(page *Page, link_num int) {
+	if link_num > 0 && int(link_num) <= len(page.Links) {
+		link := page.Links[link_num-1]
+		if link.Type == GopherQuery {
+			// get input
+			c.BuildCommandLine("Query: ", func(commandLine *tview.InputField, key tcell.Key) {
+				search_term := commandLine.GetText()
+				query_url, err := GopherQueryUrl(link, search_term)
+				if err != nil {
+					return
+				}
+				c.GotoUrl(query_url)
+			})
+
+		} else {
+			c.GotoUrl(link.Url)
+		}
+	} else {
+		log.Printf("[red]No link #%d on the current page[white]\n", link_num)
+	}
 }
 
 type LogMessageHandler struct {
