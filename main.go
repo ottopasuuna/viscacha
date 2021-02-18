@@ -294,15 +294,11 @@ func (c *Client) PageInputHandler(event *tcell.EventKey) *tcell.EventKey {
 				if link.Type == GopherQuery {
 					// get input
 					c.BuildCommandLine("Query: ", func(commandLine *tview.InputField, key tcell.Key) {
-						// This is pretty gross...
 						search_term := commandLine.GetText()
-						link_url, err := url.Parse(link.Url)
+						query_url, err := GopherQueryUrl(link, search_term)
 						if err != nil {
 							return
 						}
-						path := "/1/" + link_url.Path[3:]
-						query_url := fmt.Sprintf("%s://%s%s%%09%s",
-							link_url.Scheme, link_url.Host, path, search_term)
 						c.GotoUrl(query_url)
 					})
 

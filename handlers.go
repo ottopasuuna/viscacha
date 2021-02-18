@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"net/url"
 
 	"github.com/prologic/go-gopher"
 )
@@ -45,6 +46,18 @@ func GopherHandler(url string) (Page, bool) {
 		Content: content,
 		Links:   links,
 	}, true
+}
+
+func GopherQueryUrl(link *Link, search_term string) (string, error) {
+	// This is pretty gross...
+	link_url, err := url.Parse(link.Url)
+	if err != nil {
+		return "", err
+	}
+	path := "/1/" + link_url.Path[3:]
+	query_url := fmt.Sprintf("%s://%s%s%%09%s",
+		link_url.Scheme, link_url.Host, path, search_term)
+	return query_url, nil
 }
 
 func gopherItemToUrl(item *gopher.Item) string {
