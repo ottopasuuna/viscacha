@@ -250,6 +250,8 @@ func (c *Client) PageInputHandler(event *tcell.EventKey) *tcell.EventKey {
 					c.CommandViewLogs()
 				case "root":
 					c.CommandGoToRoot()
+				case "up":
+					c.CommandGoUp()
 				default: // Either a URL or a link number
 					if link_num, err := strconv.ParseInt(cmd, 10, 32); err == nil {
 						current_page := c.HistoryManager.CurrentPage()
@@ -352,6 +354,28 @@ func (c *Client) CommandGoToRoot() {
 	}
 	root_url := fmt.Sprintf("%s://%s", parsed_url.Scheme, parsed_url.Host)
 	c.GotoUrl(root_url)
+}
+
+func GetUpUrl(url_str string) string {
+	parsed_url, err := url.Parse(url_str)
+	if err != nil {
+		log.Println(err)
+		return ""
+	}
+	path := strings.Split(parsed_url.Path, "/")
+	if len(path) <= 2 { // 2 because "/1" -> ["", "1"]
+		return fmt.Sprintf("%s://%s", parsed_url.Scheme, parsed_url.Host)
+	}
+	up_path := path[1 : len(path)-1]
+	up_path[0] = "1" // Assumes the parent page is a directory. Probably safe?
+	up_url := fmt.Sprintf("%s://%s/%s", parsed_url.Scheme, parsed_url.Host, strings.Join(up_path, "/"))
+	return up_url
+}
+
+func (c *Client) CommandGoUp() {
+	cur_url := c.HistoryManager.CurrentPage().Url
+	up_url := GetUpUrl(cur_url)
+	c.GotoUrl(up_url)
 }
 
 type LogMessageHandler struct {
