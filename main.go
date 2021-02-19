@@ -130,7 +130,6 @@ func NewClient() *Client {
 
 func (c *Client) BuildCommandLine(label string, handler func(commandLine *tview.InputField, key tcell.Key)) {
 	go func() {
-		log.Println("Lock aquired")
 		c.cli_lock.Lock()
 		c.App.QueueUpdateDraw(func() {
 			commandLine := tview.NewInputField().
@@ -141,7 +140,6 @@ func (c *Client) BuildCommandLine(label string, handler func(commandLine *tview.
 				c.GridLayout.AddItem(c.MessageLine, 2, 0, 1, 1, 0, 0, false)
 				c.App.SetFocus(c.active_view)
 				c.cli_lock.Unlock()
-				log.Println("unlocked")
 			})
 			c.GridLayout.RemoveItem(c.MessageLine)
 			c.GridLayout.AddItem(commandLine, 2, 0, 1, 1, 0, 0, true)
@@ -250,6 +248,8 @@ func (c *Client) PageInputHandler(event *tcell.EventKey) *tcell.EventKey {
 					c.CommandForward()
 				case "showlogs":
 					c.CommandViewLogs()
+				case "root":
+					c.CommandGoToRoot()
 				default: // Either a URL or a link number
 					if link_num, err := strconv.ParseInt(cmd, 10, 32); err == nil {
 						current_page := c.HistoryManager.CurrentPage()
@@ -341,6 +341,17 @@ func (c *Client) CommandViewLogs() {
 		c.App.SetRoot(logView, true).SetFocus(logView)
 		c.active_view = logView
 	}
+}
+
+func (c *Client) CommandGoToRoot() {
+	cur_url := c.HistoryManager.CurrentPage().Url
+	parsed_url, err := url.Parse(cur_url)
+	if err != nil {
+		log.Println(err)
+		return
+	}
+	root_url := fmt.Sprintf("%s://%s", parsed_url.Scheme, parsed_url.Host)
+	c.GotoUrl(root_url)
 }
 
 type LogMessageHandler struct {
