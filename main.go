@@ -82,6 +82,7 @@ type Client struct {
 	LogHandler     *LogMessageHandler
 	cli_lock       sync.Mutex      // For ensuring only one MessageLine input field open at a time
 	active_view    tview.Primitive // Keep track of the widget to give focus back to
+	loadingLock    sync.Mutex
 }
 
 func NewClient() *Client {
@@ -151,16 +152,19 @@ func (c *Client) BuildCommandLine(label string, handler func(commandLine *tview.
 func (client *Client) GotoUrl(url string) {
 	client.SaveScroll()
 	fmt.Fprintln(client.MessageLine, "Loading...")
+	client.loadingLock.Lock()
 	go func() {
 		page, success := GopherHandler(url)
 		if !success {
 			log.Println("Failed to get gopher url")
+		} else {
+			client.App.QueueUpdateDraw(func() {
+				client.PageView.RenderPage(&page)
+				client.HistoryManager.Navigate(&page)
+				client.MessageLine.Clear()
+			})
 		}
-		client.App.QueueUpdateDraw(func() {
-			client.PageView.RenderPage(&page)
-			client.HistoryManager.Navigate(&page)
-			client.MessageLine.Clear()
-		})
+		client.loadingLock.Unlock()
 	}()
 }
 
@@ -252,6 +256,10 @@ func (c *Client) PageInputHandler(event *tcell.EventKey) *tcell.EventKey {
 					c.CommandGoToRoot()
 				case "up":
 					c.CommandGoUp()
+				case "next":
+					c.CommandGoNext()
+				case "prev":
+					c.CommandGoPrev()
 				default: // Either a URL or a link number
 					if link_num, err := strconv.ParseInt(cmd, 10, 32); err == nil {
 						current_page := c.HistoryManager.CurrentPage()
@@ -298,6 +306,13 @@ func (c *Client) FollowLink(page *Page, link_num int) {
 		} else {
 			c.GotoUrl(link.Url)
 		}
+		go func() {
+			c.loadingLock.Lock()
+			c.loadingLock.Unlock()
+			new_page := c.HistoryManager.CurrentPage()
+			new_page.Parent = page
+			new_page.LinkIndex = link_num
+		}()
 	} else {
 		log.Printf("[red]No link #%d on the current page[white]\n", link_num)
 	}
@@ -354,6 +369,29 @@ func (c *Client) CommandGoToRoot() {
 	}
 	root_url := fmt.Sprintf("%s://%s", parsed_url.Scheme, parsed_url.Host)
 	c.GotoUrl(root_url)
+}
+
+func (c *Client) CommandGoNext() {
+	cur_page := c.HistoryManager.CurrentPage()
+	parent_page := cur_page.Parent
+	next_index := cur_page.LinkIndex + 1
+	if parent_page != nil && next_index <= len(parent_page.Links) {
+		c.FollowLink(parent_page, next_index)
+	} else {
+		log.Println("[red]No next link in parent page to navigate to[white]")
+	}
+
+}
+
+func (c *Client) CommandGoPrev() {
+	cur_page := c.HistoryManager.CurrentPage()
+	parent_page := cur_page.Parent
+	prev_index := cur_page.LinkIndex - 1
+	if parent_page != nil && prev_index < 0 {
+		c.FollowLink(parent_page, prev_index)
+	} else {
+		log.Println("[red]No previous link in parent page to navigate to[white]")
+	}
 }
 
 func GetUpUrl(url_str string) string {

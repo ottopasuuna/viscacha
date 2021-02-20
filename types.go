@@ -30,4 +30,6 @@ type Page struct {
 	Content      string
 	Links        []*Link
 	ScrollOffset int
+	Parent       *Page
+	LinkIndex    int
 }
