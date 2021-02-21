@@ -2,23 +2,28 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"net/url"
+	"os"
+	"strings"
 
 	"github.com/prologic/go-gopher"
 )
 
-func GopherHandler(url string) (Page, bool) {
-	res, err := gopher.Get(url)
+var DEFAULT_DOWNLOAD_LOCAITON = fmt.Sprintf("%s/Downloads", os.Getenv("HOME"))
+
+func GopherHandler(_url string) (*Page, bool) {
+	res, err := gopher.Get(_url)
 	if err != nil {
 		log.Println(err)
-		return Page{}, false
+		return nil, false
 	}
 	content_type, ok := Gopher_to_content_type[res.Type]
 	if !ok {
 		log.Println("Unrecognized gopher file type")
-		return Page{}, false
+		return nil, false
 	}
 	var content string
 	var links []*Link
@@ -27,7 +32,7 @@ func GopherHandler(url string) (Page, bool) {
 		if err != nil {
 			log.Println("Failed to read file body")
 			log.Println(err)
-			return Page{}, false
+			return nil, false
 		}
 		content = string(body_txt)
 	} else if content_type == GopherDirectory {
@@ -35,14 +40,41 @@ func GopherHandler(url string) (Page, bool) {
 		if err != nil {
 			log.Println("Error converting GopherDirectory to text:")
 			log.Println(err)
-			return Page{}, false
+			return nil, false
 		}
 		content = string(dir_txt)
 		links = gopherMakeLinkMap(&res.Dir)
+	} else if content_type == BinaryType || content_type == ImageType {
+		//download TODO: open images/audio in external program
+		parse_url, err := url.Parse(_url)
+		if err != nil {
+			log.Println("Could not determine file name to download")
+			log.Println(err)
+			return nil, false
+		}
+		file_path := strings.Split(parse_url.Path, "/")
+		fileName := file_path[len(file_path)-1]
+		downloadPath := fmt.Sprintf("%s/%s", DEFAULT_DOWNLOAD_LOCAITON, fileName)
+		file, err := os.Create(downloadPath)
+		if err != nil {
+			log.Println("Could not download file:")
+			log.Println(err)
+			return nil, false
+		}
+		defer file.Close()
+		_, err = io.Copy(file, res.Body)
+		if err != nil {
+			log.Println("Could not download file:")
+			log.Println(err)
+			return nil, false
+		}
+		log.Printf("Download saved to %s", downloadPath)
+		return nil, true
 	}
-	return Page{
+
+	return &Page{
 		Type:    content_type,
-		Url:     url,
+		Url:     _url,
 		Content: content,
 		Links:   links,
 	}, true

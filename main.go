@@ -157,10 +157,10 @@ func (client *Client) GotoUrl(url string) {
 		page, success := GopherHandler(url)
 		if !success {
 			log.Println("Failed to get gopher url")
-		} else {
+		} else if page != nil {
 			client.App.QueueUpdateDraw(func() {
-				client.PageView.RenderPage(&page)
-				client.HistoryManager.Navigate(&page)
+				client.PageView.RenderPage(page)
+				client.HistoryManager.Navigate(page)
 				client.MessageLine.Clear()
 			})
 		}

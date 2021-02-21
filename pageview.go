@@ -106,6 +106,7 @@ func (pageview *PageView) RenderGopherDirectory(page *Page) {
 			fmt.Fprintf(textview, strings.Repeat(" ", 3+1+2+n_link_digits+1))
 		}
 		var txt_color string
+		downloadable_color := "[orange]"
 		switch item.Type {
 		case gopher.INFO:
 			txt_color = "[white]"
@@ -115,6 +116,20 @@ func (pageview *PageView) RenderGopherDirectory(page *Page) {
 			txt_color = "[skyblue]"
 		case gopher.INDEXSEARCH:
 			txt_color = "[violet]"
+		case gopher.IMAGE:
+			txt_color = downloadable_color
+		case gopher.PNG:
+			txt_color = downloadable_color
+		case gopher.GIF:
+			txt_color = downloadable_color
+		case gopher.BINARY:
+			txt_color = downloadable_color
+		case gopher.DOSARCHIVE:
+			txt_color = downloadable_color
+		case gopher.AUDIO:
+			txt_color = downloadable_color
+		case gopher.DOC:
+			txt_color = downloadable_color
 		default:
 			txt_color = "[red]"
 		}
