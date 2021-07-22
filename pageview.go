@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/gdamore/tcell/v2"
-	"github.com/prologic/go-gopher"
+	"git.mills.io/prologic/go-gopher"
 	"github.com/rivo/tview"
 )
 

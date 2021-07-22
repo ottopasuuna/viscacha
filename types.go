@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/prologic/go-gopher"
+	"git.mills.io/prologic/go-gopher"
 )
 
 type ContentType int
