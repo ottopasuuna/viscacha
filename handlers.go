@@ -9,7 +9,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/prologic/go-gopher"
+	"git.mills.io/prologic/go-gopher"
 )
 
 var DEFAULT_DOWNLOAD_LOCAITON = fmt.Sprintf("%s/Downloads", os.Getenv("HOME"))
