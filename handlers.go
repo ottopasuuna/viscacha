@@ -4,25 +4,27 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"log"
 	"net/url"
 	"os"
 	"strings"
 
 	"git.mills.io/prologic/go-gopher"
+	"github.com/op/go-logging"
 )
 
 var DEFAULT_DOWNLOAD_LOCAITON = fmt.Sprintf("%s/Downloads", os.Getenv("HOME"))
+var handler_log = logging.MustGetLogger("handler")
 
 func GopherHandler(_url string) (*Page, bool) {
+	AppLog.Info("Handling gopher url: ", _url)
 	res, err := gopher.Get(_url)
 	if err != nil {
-		log.Println(err)
+		AppLog.Error(err)
 		return nil, false
 	}
 	content_type, ok := Gopher_to_content_type[res.Type]
 	if !ok {
-		log.Println("Unrecognized gopher file type")
+		AppLog.Error("Unrecognized gopher file type")
 		return nil, false
 	}
 	var content string
@@ -30,16 +32,16 @@ func GopherHandler(_url string) (*Page, bool) {
 	if content_type == TextType {
 		body_txt, err := ioutil.ReadAll(res.Body)
 		if err != nil {
-			log.Println("Failed to read file body")
-			log.Println(err)
+			AppLog.Error("Failed to read file body")
+			AppLog.Error(err)
 			return nil, false
 		}
 		content = string(body_txt)
 	} else if content_type == GopherDirectory {
 		dir_txt, err := res.Dir.ToText()
 		if err != nil {
-			log.Println("Error converting GopherDirectory to text:")
-			log.Println(err)
+			AppLog.Error("Error converting GopherDirectory to text:")
+			AppLog.Error(err)
 			return nil, false
 		}
 		content = string(dir_txt)
@@ -48,8 +50,8 @@ func GopherHandler(_url string) (*Page, bool) {
 		//download TODO: open images/audio in external program
 		parse_url, err := url.Parse(_url)
 		if err != nil {
-			log.Println("Could not determine file name to download")
-			log.Println(err)
+			AppLog.Error("Could not determine file name to download")
+			AppLog.Error(err)
 			return nil, false
 		}
 		file_path := strings.Split(parse_url.Path, "/")
@@ -57,18 +59,18 @@ func GopherHandler(_url string) (*Page, bool) {
 		downloadPath := fmt.Sprintf("%s/%s", DEFAULT_DOWNLOAD_LOCAITON, fileName)
 		file, err := os.Create(downloadPath)
 		if err != nil {
-			log.Println("Could not download file:")
-			log.Println(err)
+			AppLog.Error("Could not download file:")
+			AppLog.Error(err)
 			return nil, false
 		}
 		defer file.Close()
 		_, err = io.Copy(file, res.Body)
 		if err != nil {
-			log.Println("Could not download file:")
-			log.Println(err)
+			AppLog.Error("Could not download file:")
+			AppLog.Error(err)
 			return nil, false
 		}
-		log.Printf("Download saved to %s", downloadPath)
+		AppLog.Error("Download saved to %s", downloadPath)
 		return nil, true
 	}
 

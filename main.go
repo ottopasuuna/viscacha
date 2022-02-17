@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/gdamore/tcell/v2"
+	"github.com/op/go-logging"
 	"github.com/rivo/tview"
 )
 
@@ -439,6 +440,8 @@ func (handler *LogMessageHandler) Write(p []byte) (n int, err error) {
 const DEFAULT_LOG_PATH = "log.log"
 const HOME_PAGE = "gopher://gopher.floodgap.com/"
 
+var AppLog = logging.MustGetLogger("viscacha")
+
 func main() {
 	// Parse cli arguments:
 	flag.Parse()
@@ -460,10 +463,21 @@ func main() {
 	var logHandler = LogMessageHandler{
 		MessageLine: client.MessageLine,
 		Text:        "",
-		LogFile:     logFile,
+		// LogFile:     logFile,
 	}
-	log.SetOutput(&logHandler)
+	// log.SetOutput(&logHandler)
 	client.LogHandler = &logHandler
+	msg_line_log_backend := logging.NewLogBackend(&logHandler, "", 0)
+	file_log_backend := logging.NewLogBackend(logFile, "", 0)
+	// verbose_log_format := logging.MustStringFormatter(
+	// 	`%{color}%{time:15:04:05} %{module} | %{shortfunc} ▶ %{level:.4s} %{id:03x}%{color:reset} %{message}`,
+	// )
+	log_format := logging.MustStringFormatter(
+		`%{time:15:04:05}| %{level:.4s}| %{message}`,
+	)
+	fmt_msg_line_log_backend := logging.NewBackendFormatter(msg_line_log_backend, log_format)
+	fmt_file_log_backend := logging.NewBackendFormatter(file_log_backend, log_format)
+	logging.SetBackend(fmt_msg_line_log_backend, fmt_file_log_backend)
 
 	// Go to a URL
 	client.GotoUrl(init_url)

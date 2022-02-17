@@ -2,12 +2,11 @@ package main
 
 import (
 	"fmt"
-	"log"
 	"math"
 	"strings"
 
-	"github.com/gdamore/tcell/v2"
 	"git.mills.io/prologic/go-gopher"
+	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 )
 
@@ -76,7 +75,7 @@ func (pageview *PageView) RenderPage(page *Page) {
 		pageview.RenderGopherDirectory(page)
 	default:
 		fmt.Fprintf(pageview.PageText, "[red] page type not recognized \"%d\"[white]", page.Type)
-		log.Printf("[red] page type not recognized \"%d\"[white]\n", page.Type)
+		AppLog.Error("[red] page type not recognized \"%d\"[white]\n", page.Type)
 	}
 	pageview.UpdateStatus()
 }
