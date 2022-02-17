@@ -95,7 +95,10 @@ func GopherQueryUrl(link *Link, search_term string) (string, error) {
 }
 
 func gopherItemToUrl(item *gopher.Item) string {
-	url := fmt.Sprintf("gopher://%s:%d/%s%s", item.Host, item.Port, string(item.Type), item.Selector)
+	// go-gopher uses url.Parse internally which doesn't handle some spaces in
+	// urls I encountered with gophernicus
+	cleaned_selector := strings.ReplaceAll(item.Selector, "#040", " ")
+	url := fmt.Sprintf("gopher://%s:%d/%s%s", item.Host, item.Port, string(item.Type), cleaned_selector)
 	return url
 }
 
