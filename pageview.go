@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"math"
 	"strings"
 
@@ -14,6 +15,7 @@ type PageView struct {
 	PageText   *tview.TextView
 	StatusLine *tview.TextView
 	currentUrl string
+	ansiWriter io.Writer
 }
 
 func NewPageView() *PageView {
@@ -22,6 +24,7 @@ func NewPageView() *PageView {
 		SetRegions(true).
 		SetWordWrap(true)
 	textView.SetBorder(false)
+	textView.SetBackgroundColor(tcell.ColorDefault)
 
 	statusLine := tview.NewTextView()
 	statusLine.SetTextColor(tcell.GetColor("black"))
@@ -29,6 +32,7 @@ func NewPageView() *PageView {
 	pageview := &PageView{
 		PageText:   textView,
 		StatusLine: statusLine,
+		ansiWriter: tview.ANSIWriter(textView),
 	}
 	return pageview
 }
@@ -83,12 +87,12 @@ func (pageview *PageView) RenderPage(page *Page) {
 func (pageview *PageView) RenderTextFile(page *Page) {
 	content := strings.ReplaceAll(page.Content, "%", "%%")
 	content = tview.Escape(content)
-	fmt.Fprintf(pageview.PageText, content)
+	fmt.Fprintf(pageview.ansiWriter, content)
 	pageview.PageText.ScrollTo(page.ScrollOffset, 0)
 }
 
 func (pageview *PageView) RenderGopherDirectory(page *Page) {
-	textview := pageview.PageText
+	textview := pageview.ansiWriter
 	link_counter := 1
 	n_link_digits := int(math.Max(math.Log10(float64(len(page.Links))), 0)) + 1
 	link_format := fmt.Sprintf("[green]%%s [%%%dd][white] ", n_link_digits)

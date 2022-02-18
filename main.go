@@ -3,8 +3,6 @@ package main
 import (
 	"flag"
 	"fmt"
-	"io"
-	"log"
 	"net/url"
 	"os"
 	"strconv"
@@ -21,6 +19,8 @@ import (
 // A Handler is a function that takes a url and fetches the content. It returns a Page
 // which contains all the relavent information. The browser history is a list of Pages.
 // Various Render functions write the Page content to a tview TextView.
+
+var AppLog = logging.MustGetLogger("viscacha")
 
 // Keeps track of page history and navigation
 type HistoryManager struct {
@@ -80,7 +80,7 @@ type Client struct {
 	MessageLine    *tview.TextView
 	App            *tview.Application
 	GridLayout     *tview.Grid
-	LogHandler     *LogMessageHandler
+	LogBuffer      strings.Builder
 	cli_lock       sync.Mutex      // For ensuring only one MessageLine input field open at a time
 	active_view    tview.Primitive // Keep track of the widget to give focus back to
 	loadingLock    sync.Mutex
@@ -98,6 +98,7 @@ func NewClient() *Client {
 	messageLine.SetChangedFunc(func() {
 		app.Draw()
 	})
+	messageLine.SetBackgroundColor(tcell.ColorDefault)
 
 	gridLayout := tview.NewGrid().
 		SetRows(0, 1, 1).
@@ -117,6 +118,10 @@ func NewClient() *Client {
 		return event
 	})
 	app.SetRoot(gridLayout, true).SetFocus(textView)
+	app.SetBeforeDrawFunc(func(screen tcell.Screen) bool {
+		screen.Clear()
+		return false
+	})
 
 	client := Client{
 		PageView:       pageView,
@@ -157,7 +162,7 @@ func (client *Client) GotoUrl(url string) {
 	go func() {
 		page, success := GopherHandler(url)
 		if !success {
-			log.Println("Failed to get gopher url")
+			AppLog.Error("Failed to get gopher url")
 		} else if page != nil {
 			client.App.QueueUpdateDraw(func() {
 				client.PageView.RenderPage(page)
@@ -265,15 +270,15 @@ func (c *Client) PageInputHandler(event *tcell.EventKey) *tcell.EventKey {
 					if link_num, err := strconv.ParseInt(cmd, 10, 32); err == nil {
 						current_page := c.HistoryManager.CurrentPage()
 						c.FollowLink(current_page, int(link_num))
-					} else if url, err := url.Parse(commandString); err == nil {
+					} else if url, err := url.Parse(commandString); err == nil && url.Scheme != "" {
 						switch url.Scheme {
 						case "gopher":
 							c.GotoUrl(commandString)
 						default:
-							log.Printf("[red]protocol \"%s\" not supported\n", url.Scheme)
+							AppLog.Errorf("Protocol \"%s\" not supported", url.Scheme)
 						}
 					} else {
-						log.Printf("[red]Not a valid command: \"%s\"[white]\n", cmd)
+						AppLog.Errorf("Not a valid command: \"%s\"", cmd)
 					}
 				}
 			}
@@ -315,7 +320,7 @@ func (c *Client) FollowLink(page *Page, link_num int) {
 			new_page.LinkIndex = link_num
 		}()
 	} else {
-		log.Printf("[red]No link #%d on the current page[white]\n", link_num)
+		AppLog.Errorf("No link #%d on the current page", link_num)
 	}
 }
 
@@ -325,7 +330,7 @@ func (c *Client) CommandBack() {
 	if prev_page != nil {
 		c.PageView.RenderPage(prev_page)
 	} else {
-		log.Println("Already at first page")
+		AppLog.Info("Already at first page")
 	}
 }
 
@@ -335,37 +340,37 @@ func (c *Client) CommandForward() {
 	if next_page != nil {
 		c.PageView.RenderPage(next_page)
 	} else {
-		log.Println("Already at last page")
+		AppLog.Info("Already at last page")
 	}
 }
 
 func (c *Client) CommandViewLogs() {
-	if c.LogHandler != nil {
-		logView := tview.NewTextView().
-			SetChangedFunc(func() {
-				c.App.Draw()
-			})
-		logView.SetBorder(true)
-		logView.SetTitle("Log Messages")
-		logView.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-			if event.Rune() == '\\' || event.Key() == tcell.KeyEscape {
-				c.App.SetRoot(c.GridLayout, true).SetFocus(c.PageView.PageText)
-				c.active_view = c.PageView.PageText
-				return nil
-			}
-			return event
+	logView := tview.NewTextView().
+		SetChangedFunc(func() {
+			c.App.Draw()
 		})
-		fmt.Fprintf(logView, c.LogHandler.Text)
-		c.App.SetRoot(logView, true).SetFocus(logView)
-		c.active_view = logView
-	}
+	logView.SetBorder(true)
+	logView.SetTitle("Log Messages")
+	logView.SetDynamicColors(true)
+	logView.SetBackgroundColor(tcell.ColorDefault)
+	logView.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		if event.Rune() == '\\' || event.Key() == tcell.KeyEscape {
+			c.App.SetRoot(c.GridLayout, true).SetFocus(c.PageView.PageText)
+			c.active_view = c.PageView.PageText
+			return nil
+		}
+		return event
+	})
+	fmt.Fprintf(tview.ANSIWriter(logView), c.LogBuffer.String())
+	c.App.SetRoot(logView, true).SetFocus(logView)
+	c.active_view = logView
 }
 
 func (c *Client) CommandGoToRoot() {
 	cur_url := c.HistoryManager.CurrentPage().Url
 	parsed_url, err := url.Parse(cur_url)
 	if err != nil {
-		log.Println(err)
+		AppLog.Error(err)
 		return
 	}
 	root_url := fmt.Sprintf("%s://%s", parsed_url.Scheme, parsed_url.Host)
@@ -379,7 +384,7 @@ func (c *Client) CommandGoNext() {
 	if parent_page != nil && next_index <= len(parent_page.Links) {
 		c.FollowLink(parent_page, next_index)
 	} else {
-		log.Println("[red]No next link in parent page to navigate to[white]")
+		AppLog.Error("No next link in parent page to navigate to")
 	}
 
 }
@@ -391,14 +396,14 @@ func (c *Client) CommandGoPrev() {
 	if parent_page != nil && prev_index < 0 {
 		c.FollowLink(parent_page, prev_index)
 	} else {
-		log.Println("[red]No previous link in parent page to navigate to[white]")
+		AppLog.Error("No previous link in parent page to navigate to")
 	}
 }
 
 func GetUpUrl(url_str string) string {
 	parsed_url, err := url.Parse(url_str)
 	if err != nil {
-		log.Println(err)
+		AppLog.Error(err)
 		return ""
 	}
 	path := strings.Split(parsed_url.Path, "/")
@@ -417,30 +422,8 @@ func (c *Client) CommandGoUp() {
 	c.GotoUrl(up_url)
 }
 
-type LogMessageHandler struct {
-	Text        string          // Internal buffer of log messages
-	MessageLine *tview.TextView // TextView to display the last log to
-	LogFile     io.Writer
-}
-
-func (handler *LogMessageHandler) Write(p []byte) (n int, err error) {
-	handler.Text = handler.Text + string(p)
-	if handler.LogFile != nil {
-		fmt.Fprintf(handler.LogFile, string(p))
-	}
-	handler.MessageLine.Clear()
-	// Cut off date/time
-	if len(p) > 20 {
-		p = p[20:]
-	}
-	fmt.Fprintf(handler.MessageLine, string(p))
-	return len(p), nil
-}
-
 const DEFAULT_LOG_PATH = "log.log"
 const HOME_PAGE = "gopher://gopher.floodgap.com/"
-
-var AppLog = logging.MustGetLogger("viscacha")
 
 func main() {
 	// Parse cli arguments:
@@ -456,28 +439,26 @@ func main() {
 	// Setup log file handling
 	logFile, err := os.Create(DEFAULT_LOG_PATH)
 	if err != nil {
-		log.Println(err)
+		AppLog.Error(err)
 	} else {
 		defer logFile.Close()
 	}
-	var logHandler = LogMessageHandler{
-		MessageLine: client.MessageLine,
-		Text:        "",
-		// LogFile:     logFile,
-	}
-	// log.SetOutput(&logHandler)
-	client.LogHandler = &logHandler
-	msg_line_log_backend := logging.NewLogBackend(&logHandler, "", 0)
+	buffer_log_backend := logging.NewLogBackend(&client.LogBuffer, "", 0)
+	msg_line_log_backend := logging.NewLogBackend(tview.ANSIWriter(client.MessageLine), "", 0)
 	file_log_backend := logging.NewLogBackend(logFile, "", 0)
-	// verbose_log_format := logging.MustStringFormatter(
-	// 	`%{color}%{time:15:04:05} %{module} | %{shortfunc} ▶ %{level:.4s} %{id:03x}%{color:reset} %{message}`,
-	// )
-	log_format := logging.MustStringFormatter(
-		`%{time:15:04:05}| %{level:.4s}| %{message}`,
+	verbose_log_format := logging.MustStringFormatter(
+		`%{color}%{time:15:04:05} %{module} | %{shortfunc} ▶ %{level:.4s} %{id:03x}%{color:reset} %{message}`,
 	)
-	fmt_msg_line_log_backend := logging.NewBackendFormatter(msg_line_log_backend, log_format)
-	fmt_file_log_backend := logging.NewBackendFormatter(file_log_backend, log_format)
-	logging.SetBackend(fmt_msg_line_log_backend, fmt_file_log_backend)
+	log_format := logging.MustStringFormatter(
+		`%{color}%{time:15:04:05}| %{level:.4s}|%{color:reset} %{message}`,
+	)
+	msg_line_log_format := logging.MustStringFormatter(
+		`%{color}%{message}%{color:reset}`,
+	)
+	fmt_msg_line_log_backend := logging.NewBackendFormatter(msg_line_log_backend, msg_line_log_format)
+	fmt_file_log_backend := logging.NewBackendFormatter(file_log_backend, verbose_log_format)
+	fmt_old_log_backend := logging.NewBackendFormatter(buffer_log_backend, log_format)
+	logging.SetBackend(fmt_msg_line_log_backend, fmt_file_log_backend, fmt_old_log_backend)
 
 	// Go to a URL
 	client.GotoUrl(init_url)
