@@ -75,15 +75,17 @@ func (manager *HistoryManager) CurrentPage() *Page {
 }
 
 type Client struct {
-	PageView       *PageView
-	HistoryManager *HistoryManager
-	MessageLine    *tview.TextView
-	App            *tview.Application
-	GridLayout     *tview.Grid
-	LogBuffer      strings.Builder
-	cli_lock       sync.Mutex      // For ensuring only one MessageLine input field open at a time
-	active_view    tview.Primitive // Keep track of the widget to give focus back to
-	loadingLock    sync.Mutex
+	PageView          *PageView
+	HistoryManager    *HistoryManager
+	MessageLine       *tview.TextView
+	App               *tview.Application
+	GridLayout        *tview.Grid
+	LogBuffer         strings.Builder
+	cli_lock          sync.Mutex      // For ensuring only one MessageLine input field open at a time
+	active_view       tview.Primitive // Keep track of the widget to give focus back to
+	loadingLock       sync.Mutex
+	commandNameToFunc map[string]func()
+	keyBindings       map[rune]string
 }
 
 func NewClient() *Client {
@@ -130,9 +132,41 @@ func NewClient() *Client {
 		App:            app,
 		GridLayout:     gridLayout,
 		active_view:    pageView.PageText,
+		keyBindings: map[rune]string{
+			'j':  "scroll-down",
+			'k':  "scroll-up",
+			'g':  "scroll-top",
+			'G':  "scroll-bottom",
+			'd':  "scroll-hpage_down",
+			'u':  "scroll-hpage_up",
+			'h':  "back",
+			'l':  "forward",
+			'\\': "show-logs",
+			':':  "cmd-prompt",
+		},
 	}
+	client.initCommandNameMap()
 	textView.SetInputCapture(client.PageInputHandler)
 	return &client
+}
+
+func (c *Client) initCommandNameMap() {
+	c.commandNameToFunc = map[string]func(){
+		"scroll-up":         c.CommandScrollUp,
+		"scroll-down":       c.CommandScrollDown,
+		"scroll-top":        c.CommandScrollTop,
+		"scroll-bottom":     c.CommandScrollBottom,
+		"scroll-hpage_up":   c.CommandScrollHalfUp,
+		"scroll-hpage_down": c.CommandScrollHalfDown,
+		"back":              c.CommandBack,
+		"forward":           c.CommandForward,
+		"up":                c.CommandGoUp,
+		"next":              c.CommandGoNext,
+		"prev":              c.CommandGoPrev,
+		"root":              c.CommandGoToRoot,
+		"show-logs":         c.CommandViewLogs,
+		"cmd-prompt":        c.CommandCmdPrompt,
+	}
 }
 
 func (c *Client) BuildCommandLine(label string, handler func(commandLine *tview.InputField, key tcell.Key)) {
@@ -186,105 +220,17 @@ func (c *Client) PageInputHandler(event *tcell.EventKey) *tcell.EventKey {
 	if c.MessageLine.GetText(true) != "Loading...\n" {
 		c.MessageLine.Clear()
 	}
-	switch event.Rune() {
-	case 'k':
-		curr_row, _ := c.PageView.PageText.GetScrollOffset()
-		scrollDest := curr_row - 1
-		if scrollDest <= 0 {
-			scrollDest = 0
+	binding, is_bound := c.keyBindings[event.Rune()]
+	if is_bound {
+		cmd_func, is_cmd := c.commandNameToFunc[binding]
+		if is_cmd {
+			cmd_func()
+			return nil
+		} else {
+			AppLog.Error("Not a valid command: \"%s\"", binding)
 		}
-		c.PageView.PageText.ScrollTo(scrollDest, 0)
-		c.PageView.UpdateStatus()
-		return nil
-	case 'j':
-		curr_row, _ := c.PageView.PageText.GetScrollOffset()
-		scrollDest := curr_row + 1
-		bottom := c.PageView.NumLines()
-		if scrollDest >= bottom {
-			scrollDest = bottom
-		}
-		c.PageView.PageText.ScrollTo(scrollDest, 0)
-		c.PageView.UpdateStatus()
-		return nil
-	case 'g':
-		c.PageView.PageText.ScrollToBeginning()
-		c.PageView.UpdateStatus()
-		return nil
-	case 'G':
-		c.PageView.PageText.ScrollToEnd()
-		c.PageView.UpdateStatus()
-		return nil
-	case 'd':
-		_, _, _, height := c.PageView.PageText.GetRect()
-		curr_row, _ := c.PageView.PageText.GetScrollOffset()
-		scrollDest := curr_row + height/2
-		bottom := c.PageView.NumLines()
-		if scrollDest >= bottom {
-			scrollDest = bottom
-		}
-		c.PageView.PageText.ScrollTo(scrollDest, 0)
-		c.PageView.UpdateStatus()
-		return nil
-	case 'u':
-		_, _, _, height := c.PageView.PageText.GetRect()
-		curr_row, _ := c.PageView.PageText.GetScrollOffset()
-		scrollDest := curr_row - height/2
-		if scrollDest <= 0 {
-			scrollDest = 0
-		}
-		c.PageView.PageText.ScrollTo(scrollDest, 0)
-		c.PageView.UpdateStatus()
-		return nil
-	case 'h':
-		c.CommandBack()
-		return nil
-	case 'l':
-		c.CommandForward()
-		return nil
-	case '\\': // Log view page
-		c.CommandViewLogs()
-		return nil
-	case ':':
-		// Open command line
-		c.BuildCommandLine(": ", func(commandLine *tview.InputField, key tcell.Key) {
-			if key == tcell.KeyEnter {
-				// Dispatch command
-				commandString := commandLine.GetText()
-				cmd := strings.Split(commandString, " ")[0]
-				switch cmd {
-				case "back":
-					c.CommandBack()
-				case "forward":
-					c.CommandForward()
-				case "showlogs":
-					c.CommandViewLogs()
-				case "root":
-					c.CommandGoToRoot()
-				case "up":
-					c.CommandGoUp()
-				case "next":
-					c.CommandGoNext()
-				case "prev":
-					c.CommandGoPrev()
-				default: // Either a URL or a link number
-					if link_num, err := strconv.ParseInt(cmd, 10, 32); err == nil {
-						current_page := c.HistoryManager.CurrentPage()
-						c.FollowLink(current_page, int(link_num))
-					} else if url, err := url.Parse(commandString); err == nil && url.Scheme != "" {
-						switch url.Scheme {
-						case "gopher":
-							c.GotoUrl(commandString)
-						default:
-							AppLog.Errorf("Protocol \"%s\" not supported", url.Scheme)
-						}
-					} else {
-						AppLog.Errorf("Not a valid command: \"%s\"", cmd)
-					}
-				}
-			}
-		})
-		return nil
 	}
+
 	// Bind number keys to quick select links
 	for i := 1; i <= 9; i++ {
 		if (event.Rune()) == rune(i+48) {
@@ -322,6 +268,88 @@ func (c *Client) FollowLink(page *Page, link_num int) {
 	} else {
 		AppLog.Errorf("No link #%d on the current page", link_num)
 	}
+}
+
+func (c *Client) CommandCmdPrompt() {
+	c.BuildCommandLine(": ", func(commandLine *tview.InputField, key tcell.Key) {
+		if key == tcell.KeyEnter {
+			// Dispatch command
+			commandString := commandLine.GetText()
+			cmd := strings.Split(commandString, " ")[0]
+			cmd_func, in_cmd_map := c.commandNameToFunc[cmd]
+			if in_cmd_map {
+				cmd_func()
+			} else {
+				if link_num, err := strconv.ParseInt(cmd, 10, 32); err == nil {
+					current_page := c.HistoryManager.CurrentPage()
+					c.FollowLink(current_page, int(link_num))
+				} else if url, err := url.Parse(commandString); err == nil && url.Scheme != "" {
+					switch url.Scheme {
+					case "gopher":
+						c.GotoUrl(commandString)
+					default:
+						AppLog.Errorf("Protocol \"%s\" not supported", url.Scheme)
+					}
+				} else {
+					AppLog.Errorf("Not a valid command: \"%s\"", cmd)
+				}
+			}
+		}
+	})
+}
+
+func (c *Client) CommandScrollUp() {
+	curr_row, _ := c.PageView.PageText.GetScrollOffset()
+	scrollDest := curr_row - 1
+	if scrollDest <= 0 {
+		scrollDest = 0
+	}
+	c.PageView.PageText.ScrollTo(scrollDest, 0)
+	c.PageView.UpdateStatus()
+}
+
+func (c *Client) CommandScrollDown() {
+	curr_row, _ := c.PageView.PageText.GetScrollOffset()
+	scrollDest := curr_row + 1
+	bottom := c.PageView.NumLines()
+	if scrollDest >= bottom {
+		scrollDest = bottom
+	}
+	c.PageView.PageText.ScrollTo(scrollDest, 0)
+	c.PageView.UpdateStatus()
+}
+
+func (c *Client) CommandScrollTop() {
+	c.PageView.PageText.ScrollToBeginning()
+	c.PageView.UpdateStatus()
+}
+
+func (c *Client) CommandScrollBottom() {
+	c.PageView.PageText.ScrollToEnd()
+	c.PageView.UpdateStatus()
+}
+
+func (c *Client) CommandScrollHalfDown() {
+	_, _, _, height := c.PageView.PageText.GetRect()
+	curr_row, _ := c.PageView.PageText.GetScrollOffset()
+	scrollDest := curr_row + height/2
+	bottom := c.PageView.NumLines()
+	if scrollDest >= bottom {
+		scrollDest = bottom
+	}
+	c.PageView.PageText.ScrollTo(scrollDest, 0)
+	c.PageView.UpdateStatus()
+}
+
+func (c *Client) CommandScrollHalfUp() {
+	_, _, _, height := c.PageView.PageText.GetRect()
+	curr_row, _ := c.PageView.PageText.GetScrollOffset()
+	scrollDest := curr_row - height/2
+	if scrollDest <= 0 {
+		scrollDest = 0
+	}
+	c.PageView.PageText.ScrollTo(scrollDest, 0)
+	c.PageView.UpdateStatus()
 }
 
 func (c *Client) CommandBack() {
