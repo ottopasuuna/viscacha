@@ -171,8 +171,8 @@ func NewClient(userConfig UserConfig) *Client {
 
 // User configurable settings are stored in here
 type UserConfig struct {
-	Bindings map[string]string `json: bindings`
-	HomePage string            `json: homepage`
+	Bindings map[string]string `json:"bindings"`
+	HomePage string            `json:"homepage"`
 }
 
 func ReadConfig(path string) UserConfig {

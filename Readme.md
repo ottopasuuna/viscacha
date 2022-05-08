@@ -10,7 +10,7 @@ Inspired by bombadillo and amfora, sort of a combination of the two.
     - [X] 1 Directory
     - [X] 7 Index-Search
     - [X] 4, 5, 9, g, I:  hex, binary file or image to download
-- [o] Configurablility
+- [ ] Configurablility
     - [X] Key bindings
     - [ ] Colors
 - [ ] Bookmarks
