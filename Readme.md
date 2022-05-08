@@ -10,13 +10,13 @@ Inspired by bombadillo and amfora, sort of a combination of the two.
     - [X] 1 Directory
     - [X] 7 Index-Search
     - [X] 4, 5, 9, g, I:  hex, binary file or image to download
-- [ ] Gemini support
-- [ ] Simple http support? maybe...
+- [o] Configurablility
+    - [X] Key bindings
+    - [ ] Colors
 - [ ] Bookmarks
 - [ ] Persistant history
 - [ ] Tabs
 - [ ] Download and open media with external programs
-- [ ] Configurablility
-    - [ ] Key bindings
-    - [ ] Colors
+- [ ] Gemini support
+- [ ] Simple http support? maybe...
 

@@ -1,8 +1,10 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
+	"io/ioutil"
 	"net/url"
 	"os"
 	"strconv"
@@ -21,6 +23,23 @@ import (
 // Various Render functions write the Page content to a tview TextView.
 
 var AppLog = logging.MustGetLogger("viscacha")
+
+var DefaultKeyBindings = map[string]string{
+	"j":  "scroll-down",
+	"k":  "scroll-up",
+	"g":  "scroll-top",
+	"G":  "scroll-bottom",
+	"d":  "scroll-hpage-down",
+	"u":  "scroll-hpage-up",
+	"h":  "back",
+	"l":  "forward",
+	"\\": "show-logs",
+	":":  "cmd-prompt",
+}
+
+const DEFAULT_LOG_PATH = "log.log"
+const DEFAULT_CONFIG_PATH = "config.json"
+const HOME_PAGE = "gopher://gopher.floodgap.com/"
 
 // Keeps track of page history and navigation
 type HistoryManager struct {
@@ -85,10 +104,10 @@ type Client struct {
 	active_view       tview.Primitive // Keep track of the widget to give focus back to
 	loadingLock       sync.Mutex
 	commandNameToFunc map[string]func()
-	keyBindings       map[rune]string
+	keyBindings       map[string]string
 }
 
-func NewClient() *Client {
+func NewClient(userConfig UserConfig) *Client {
 	app := tview.NewApplication()
 
 	pageView := NewPageView()
@@ -111,6 +130,7 @@ func NewClient() *Client {
 	gridLayout.AddItem(statusLine, 1, 0, 1, 1, 0, 0, false)
 	gridLayout.AddItem(messageLine, 2, 0, 1, 1, 0, 0, false)
 
+	// TODO: this makes it imposible to type the letter q in any text field...
 	app.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		switch event.Rune() {
 		case 'q':
@@ -125,6 +145,16 @@ func NewClient() *Client {
 		return false
 	})
 
+	keyBindings := make(map[string]string)
+	for key, command := range DefaultKeyBindings {
+		keyBindings[key] = command
+	}
+	if userConfig.Bindings != nil {
+		for key, command := range userConfig.Bindings {
+			keyBindings[key] = command
+		}
+	}
+
 	client := Client{
 		PageView:       pageView,
 		HistoryManager: &HistoryManager{},
@@ -132,22 +162,30 @@ func NewClient() *Client {
 		App:            app,
 		GridLayout:     gridLayout,
 		active_view:    pageView.PageText,
-		keyBindings: map[rune]string{
-			'j':  "scroll-down",
-			'k':  "scroll-up",
-			'g':  "scroll-top",
-			'G':  "scroll-bottom",
-			'd':  "scroll-hpage-down",
-			'u':  "scroll-hpage-up",
-			'h':  "back",
-			'l':  "forward",
-			'\\': "show-logs",
-			':':  "cmd-prompt",
-		},
+		keyBindings:    keyBindings,
 	}
 	client.initCommandNameMap()
 	textView.SetInputCapture(client.PageInputHandler)
 	return &client
+}
+
+// User configurable settings are stored in here
+type UserConfig struct {
+	Bindings map[string]string `json: bindings`
+	HomePage string            `json: homepage`
+}
+
+func ReadConfig(path string) UserConfig {
+	var userconfig UserConfig
+	content, err := ioutil.ReadFile(path)
+	if err != nil {
+		AppLog.Errorf("Failed to read config file \"%s\"\n\t%v", path, err)
+	}
+	err = json.Unmarshal(content, &userconfig)
+	if err != nil {
+		AppLog.Errorf("Failed to parse config file \"%s\"\n\t%v", path, err)
+	}
+	return userconfig
 }
 
 func (c *Client) initCommandNameMap() {
@@ -220,7 +258,7 @@ func (c *Client) PageInputHandler(event *tcell.EventKey) *tcell.EventKey {
 	if c.MessageLine.GetText(true) != "Loading...\n" {
 		c.MessageLine.Clear()
 	}
-	binding, is_bound := c.keyBindings[event.Rune()]
+	binding, is_bound := c.keyBindings[string(event.Rune())]
 	if is_bound {
 		cmd_func, is_cmd := c.commandNameToFunc[binding]
 		if is_cmd {
@@ -450,19 +488,24 @@ func (c *Client) CommandGoUp() {
 	c.GotoUrl(up_url)
 }
 
-const DEFAULT_LOG_PATH = "log.log"
-const HOME_PAGE = "gopher://gopher.floodgap.com/"
-
 func main() {
 	// Parse cli arguments:
 	flag.Parse()
 	var init_url = flag.Arg(0)
+
+	// Parse user config file
+	userConfig := ReadConfig(DEFAULT_CONFIG_PATH)
+
 	if init_url == "" {
-		init_url = HOME_PAGE
+		home_page := userConfig.HomePage
+		if home_page == "" {
+			home_page = HOME_PAGE
+		}
+		init_url = home_page
 	}
 
 	// Build tview Application UI
-	client := NewClient()
+	client := NewClient(userConfig)
 
 	// Setup log file handling
 	logFile, err := os.Create(DEFAULT_LOG_PATH)
