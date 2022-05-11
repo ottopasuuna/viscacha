@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/adrg/xdg"
 	"github.com/gdamore/tcell/v2"
 	"github.com/op/go-logging"
 	"github.com/rivo/tview"
@@ -39,7 +40,7 @@ var DefaultKeyBindings = map[string]string{
 
 const DEFAULT_LOG_PATH = "log.log"
 const DEFAULT_CONFIG_PATH = "config.json"
-const HOME_PAGE = "gopher://gopher.floodgap.com/"
+const DEFAULT_HOME_PAGE = "gopher://gopher.floodgap.com/"
 
 // Keeps track of page history and navigation
 type HistoryManager struct {
@@ -175,15 +176,26 @@ type UserConfig struct {
 	HomePage string            `json:"homepage"`
 }
 
+// Read the users json config file. If the file does not exist, return a default one.
 func ReadConfig(path string) UserConfig {
 	var userconfig UserConfig
 	content, err := ioutil.ReadFile(path)
+	if os.IsNotExist(err) {
+		return UserConfig{
+			Bindings: DefaultKeyBindings,
+			HomePage: DEFAULT_HOME_PAGE,
+		}
+	}
 	if err != nil {
 		AppLog.Errorf("Failed to read config file \"%s\"\n\t%v", path, err)
 	}
 	err = json.Unmarshal(content, &userconfig)
 	if err != nil {
 		AppLog.Errorf("Failed to parse config file \"%s\"\n\t%v", path, err)
+	}
+	// Fill in Default values
+	if userconfig.HomePage == "" {
+		userconfig.HomePage = DEFAULT_HOME_PAGE
 	}
 	return userconfig
 }
@@ -490,25 +502,39 @@ func (c *Client) CommandGoUp() {
 
 func main() {
 	// Parse cli arguments:
+	var log_path string
+	var user_config_file string
+	var err error
+	flag.StringVar(&log_path, "l", "", "File path to write logging information to.")
+	flag.StringVar(&user_config_file, "c", "", "Specify user configuration file")
 	flag.Parse()
 	var init_url = flag.Arg(0)
 
 	// Parse user config file
-	userConfig := ReadConfig(DEFAULT_CONFIG_PATH)
+
+	if user_config_file == "" {
+		user_config_file, err = xdg.ConfigFile("viscacha.json")
+		if err != nil {
+			AppLog.Error(err)
+		}
+	}
+	userConfig := ReadConfig(user_config_file)
 
 	if init_url == "" {
-		home_page := userConfig.HomePage
-		if home_page == "" {
-			home_page = HOME_PAGE
-		}
-		init_url = home_page
+		init_url = userConfig.HomePage
 	}
 
 	// Build tview Application UI
 	client := NewClient(userConfig)
 
 	// Setup log file handling
-	logFile, err := os.Create(DEFAULT_LOG_PATH)
+	if log_path == "" {
+		log_path, err = xdg.DataFile("viscacha/viscacha.log")
+		if err != nil {
+			AppLog.Error(err)
+		}
+	}
+	logFile, err := os.Create(log_path)
 	if err != nil {
 		AppLog.Error(err)
 	} else {
